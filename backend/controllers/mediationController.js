@@ -1,103 +1,24 @@
 const connectDB = require('../config/db');
 const { notifyUsersAboutCase } = require('./notificationsController');
+const {
+  getAvailableSlotsDetails,
+  setMediationScheduleDb,
+  listAllMediationsDetailed,
+  saveMediationSessionDb,
+  softDeleteMediationDb,
+  rescheduleMediationDb,
+} = require('../models/mediationModel');
 
 exports.setMediationSchedule = async (req, res) => {
   const { complaint_id, date, time } = req.body;
   const connection = await connectDB();
   try {
-    // VALIDATION: Check scheduling constraints
-    const [existingSchedules] = await connection.execute(
-      'SELECT id, complaint_id, time FROM mediation WHERE date = ? AND is_deleted = 0',
-      [date]
-    );
-
-    // Check if maximum 4 schedules per day
-    if (existingSchedules.length >= 4) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Maximum 4 mediation sessions allowed per day. Please choose a different date.' 
-      });
-    }
-
-    // Helper function to convert time string to minutes
-    const timeToMinutes = (timeStr) => {
-      if (!timeStr) return 0;
-      const [hours, minutes] = timeStr.split(':').map(Number);
-      return hours * 60 + (minutes || 0);
-    };
-
-    // Check for time conflicts
-    const selectedTimeMinutes = timeToMinutes(time);
-    
-    for (const schedule of existingSchedules) {
-      // Skip if this is the same complaint (updating existing mediation)
-      if (schedule.complaint_id === complaint_id) continue;
-      
-      const existingTimeMinutes = timeToMinutes(schedule.time);
-      const timeDifference = Math.abs(selectedTimeMinutes - existingTimeMinutes);
-      
-      // Check for exact time match (0 minutes difference)
-      if (timeDifference === 0) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'This time slot is already booked. Please choose a different time.' 
-        });
-      }
-      
-      // Check 1-hour interval constraint (60 minutes = 1 hour)
-      if (timeDifference < 60) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Minimum 1-hour interval required between mediation sessions. Please choose a different time.' 
-        });
-      }
-    }
-
-    // Check if mediation already exists for this complaint
-    const [existing] = await connection.execute(
-      'SELECT id FROM mediation WHERE complaint_id = ? AND is_deleted = 0',
-      [complaint_id]
-    );
-
-    if (existing.length > 0) {
-      // Update existing mediation
-      await connection.execute(
-        'UPDATE mediation SET date = ?, time = ? WHERE complaint_id = ? AND is_deleted = 0',
-        [date, time, complaint_id]
-      );
-    } else {
-      // Create new mediation (no minutes column)
-      await connection.execute(
-        'INSERT INTO mediation (complaint_id, date, time) VALUES (?, ?, ?)',
-        [complaint_id, date, time]
-      );
-    }
-    
-    // Clear any existing conciliation and arbitration schedules for this complaint to free up time slots
-    // This handles cases where a case is moved back to mediation from later processes
-    await connection.execute(
-      'DELETE FROM conciliation WHERE complaint_id = ?',
-      [complaint_id]
-    );
-    
-    await connection.execute(
-      'UPDATE arbitration SET is_deleted = 1 WHERE complaint_id = ? AND is_deleted = 0',
-      [complaint_id]
-    );
-    
-    // Update complaint status to 'Mediation'
-    await connection.execute(
-      'UPDATE complaints SET status = ? WHERE id = ?',
-      ['Mediation', complaint_id]
-    );
-    
-    // Create notification for users
+    await setMediationScheduleDb(connection, { complaint_id, date, time });
     await notifyUsersAboutCase(complaint_id, 'mediation_scheduled');
-    
     res.json({ success: true });
   } catch (error) {
     console.error('Error in setMediationSchedule:', error);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(400).json({ success: false, error: error.message });
   } finally {
     await connection.end();
   }
@@ -107,55 +28,7 @@ exports.setMediationSchedule = async (req, res) => {
 exports.getAllMediations = async (req, res) => {
   const connection = await connectDB();
   try {
-    const [mediations] = await connection.execute(
-      `SELECT m.id, m.complaint_id, 
-        DATE_FORMAT(m.date, '%Y-%m-%d') as date, 
-        m.time, m.created_at, c.case_title,
-        c.status,
-        CASE 
-          WHEN complainant_res.lastname IS NOT NULL AND complainant_res.firstname IS NOT NULL THEN 
-            CONCAT(UPPER(complainant_res.lastname), ', ', UPPER(complainant_res.firstname), 
-                   CASE WHEN complainant_res.middlename IS NOT NULL AND complainant_res.middlename != '' 
-                        THEN CONCAT(' ', UPPER(complainant_res.middlename)) 
-                        ELSE '' END)
-          WHEN complainant_res.lastname IS NOT NULL THEN UPPER(complainant_res.lastname)
-          WHEN complainant_res.firstname IS NOT NULL THEN UPPER(complainant_res.firstname)
-          WHEN complainant_res.id IS NOT NULL THEN CONCAT('RESIDENT #', complainant_res.id)
-          ELSE 'UNKNOWN COMPLAINANT'
-        END AS complainant,
-        CASE 
-          WHEN respondent_res.lastname IS NOT NULL AND respondent_res.firstname IS NOT NULL THEN 
-            CONCAT(UPPER(respondent_res.lastname), ', ', UPPER(respondent_res.firstname), 
-                   CASE WHEN respondent_res.middlename IS NOT NULL AND respondent_res.middlename != '' 
-                        THEN CONCAT(' ', UPPER(respondent_res.middlename)) 
-                        ELSE '' END)
-          WHEN respondent_res.lastname IS NOT NULL THEN UPPER(respondent_res.lastname)
-          WHEN respondent_res.firstname IS NOT NULL THEN UPPER(respondent_res.firstname)
-          WHEN respondent_res.id IS NOT NULL THEN CONCAT('RESIDENT #', respondent_res.id)
-          ELSE 'UNKNOWN RESPONDENT'
-        END AS respondent,
-        CASE 
-          WHEN witness_res.lastname IS NOT NULL AND witness_res.firstname IS NOT NULL THEN 
-            CONCAT(UPPER(witness_res.lastname), ', ', UPPER(witness_res.firstname), 
-                   CASE WHEN witness_res.middlename IS NOT NULL AND witness_res.middlename != '' 
-                        THEN CONCAT(' ', UPPER(witness_res.middlename)) 
-                        ELSE '' END)
-          WHEN witness_res.lastname IS NOT NULL THEN UPPER(witness_res.lastname)
-          WHEN witness_res.firstname IS NOT NULL THEN UPPER(witness_res.firstname)
-          WHEN witness_res.id IS NOT NULL THEN CONCAT('RESIDENT #', witness_res.id)
-          ELSE 'UNKNOWN WITNESS'
-        END AS witness,
-        witness_res.purok AS witness_purok,
-        witness_res.contact AS witness_contact,
-        witness_res.barangay AS witness_barangay
-      FROM mediation m
-      JOIN complaints c ON m.complaint_id = c.id
-      LEFT JOIN residents complainant_res ON c.complainant_id = complainant_res.id
-      LEFT JOIN residents respondent_res ON c.respondent_id = respondent_res.id
-      LEFT JOIN residents witness_res ON c.witness_id = witness_res.id
-      WHERE m.is_deleted = 0 AND c.status = 'Mediation'
-      ORDER BY m.id DESC`
-    );
+    const mediations = await listAllMediationsDetailed(connection);
     // Fetch reschedules and their specific documentation for each mediation session
     for (const mediation of mediations) {
       const [reschedules] = await connection.execute(
@@ -275,21 +148,17 @@ exports.saveMediationSession = async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
-  } finally {
-    await connection.end();
   }
 };
 
 exports.softDeleteSession = async (req, res) => {
-  const { id } = req.params;
+  const { mediation_id } = req.params;
   const connection = await connectDB();
   try {
-    await connection.execute(
-      'UPDATE mediation SET is_deleted = 1 WHERE id = ?',
-      [id]
-    );
+    await softDeleteMediationDb(connection, mediation_id);
     res.json({ success: true });
   } catch (error) {
+    console.error('Error soft deleting mediation session:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
     await connection.end();
@@ -298,36 +167,11 @@ exports.softDeleteSession = async (req, res) => {
 
 // Reschedule a mediation session
 exports.rescheduleMediation = async (req, res) => {
-  const { mediation_id, reschedule_date, reschedule_time, reason } = req.body;
   const connection = await connectDB();
   try {
-    // Get complaint_id from mediation record for notification
-    const [mediationResult] = await connection.execute(
-      'SELECT complaint_id FROM mediation WHERE id = ?',
-      [mediation_id]
-    );
-    
-    if (mediationResult.length === 0) {
-      return res.status(404).json({ success: false, message: 'Mediation not found' });
-    }
-    
-    const complaint_id = mediationResult[0].complaint_id;
-    
-    // Insert reschedule record (no minutes initially)
-    await connection.execute(
-      'INSERT INTO mediation_reschedule (mediation_id, reschedule_date, reschedule_time, reason) VALUES (?, ?, ?, ?)',
-      [mediation_id, reschedule_date, reschedule_time, reason]
-    );
-    
-    // Update mediation schedule to reflect current active schedule
-    await connection.execute(
-      'UPDATE mediation SET date = ?, time = ? WHERE id = ?',
-      [reschedule_date, reschedule_time, mediation_id]
-    );
-    
-    // Create notification for users about reschedule
+    const { mediation_id, reschedule_date, reschedule_time, reason } = req.body;
+    const complaint_id = await rescheduleMediationDb(connection, { mediation_id, reschedule_date, reschedule_time, reason });
     await notifyUsersAboutCase(complaint_id, 'session_rescheduled');
-    
     res.json({ success: true });
   } catch (error) {
     console.error('Error in rescheduleMediation:', error);
@@ -341,47 +185,8 @@ exports.rescheduleMediation = async (req, res) => {
 exports.getAvailableSlots = async (req, res) => {
   const { date } = req.params;
   const connection = await connectDB();
-  
   try {
-    // Get all scheduled sessions for the given date from ALL THREE systems: mediation, conciliation, and arbitration
-    // Since they share the same time slots, we need to check all three for complete cross-system validation
-    const [mediationSchedules] = await connection.execute(
-      'SELECT time FROM mediation WHERE date = ? AND is_deleted = 0',
-      [date]
-    );
-    
-    const [conciliationSchedules] = await connection.execute(
-      'SELECT time FROM conciliation WHERE date = ?',
-      [date]
-    );
-    
-    const [arbitrationSchedules] = await connection.execute(
-      'SELECT time FROM arbitration WHERE date = ? AND is_deleted = 0',
-      [date]
-    );
-
-    // Define all available time slots
-    const allTimeSlots = [
-      '08:00', '09:00', '10:00', '11:00', 
-      '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'
-    ];
-
-    // Combine booked times from mediation, conciliation, AND arbitration
-    const mediationTimes = mediationSchedules.map(schedule => schedule.time);
-    const conciliationTimes = conciliationSchedules.map(schedule => schedule.time);
-    const arbitrationTimes = arbitrationSchedules.map(schedule => schedule.time);
-    const allBookedTimes = [...mediationTimes, ...conciliationTimes, ...arbitrationTimes];
-    
-    // Remove duplicates and get unique booked times
-    const bookedTimes = [...new Set(allBookedTimes)];
-    
-    // Calculate available slots
-    const availableSlots = allTimeSlots.filter(slot => !bookedTimes.includes(slot));
-    const usedSlots = bookedTimes.length;
-    const maxSlotsPerDay = 4;
-    const isFull = usedSlots >= maxSlotsPerDay;
-
-    // Format scheduled times for display (convert to 12-hour format)
+    const { availableTimes, bookedTimes, usedSlots, maxSlotsPerDay, isFull } = await getAvailableSlotsDetails(connection, date);
     const formatTime = (time24) => {
       const [hours, minutes] = time24.split(':');
       const hour12 = parseInt(hours) > 12 ? parseInt(hours) - 12 : parseInt(hours);
@@ -389,25 +194,22 @@ exports.getAvailableSlots = async (req, res) => {
       const displayHour = hour12 === 0 ? 12 : hour12;
       return `${displayHour}:${minutes} ${ampm}`;
     };
-
     const scheduledTimes = bookedTimes.map(formatTime);
-
     res.json({
       success: true,
       data: {
-        availableSlots: availableSlots.length,
+        availableSlots: availableTimes.length,
         usedSlots,
         maxSlotsPerDay,
         scheduledTimes,
-        bookedTimes, // Raw 24-hour format for frontend filtering
-        isFull
-      }
+        bookedTimes,
+        isFull,
+      },
     });
-
   } catch (error) {
     console.error('Error in getAvailableSlots:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
     await connection.end();
   }
-}; 
+};

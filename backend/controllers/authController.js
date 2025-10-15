@@ -1,4 +1,5 @@
 const connectDB = require('../config/db');
+const { findUserByEmail, insertUser, updatePasswordByEmail } = require('../models/authModel');
 const bcrypt = require('bcryptjs');
 const { generateToken } = require('../middleware/auth');
 const { sendVerificationCode, maskEmail } = require('../services/mailer');
@@ -141,26 +142,26 @@ exports.setupAccounts = async (req, res) => {
     const connection = await connectDB();
     const salt = await bcrypt.genSalt(10);
     const adminPassword = await bcrypt.hash('password123', salt);
-    const secretaryPassword = await bcrypt.hash('password123', salt);
 
-    const [adminRows] = await connection.execute('SELECT * FROM users WHERE email = ?', ['admin@lupon.com']);
+    const adminRows = await findUserByEmail(connection, 'admin@lupon.com');
     if (adminRows.length === 0) {
-      await connection.execute(
-        `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['Admin', 'System', '', 'admin@lupon.com', adminPassword, '2000-01-01', 'Male', 'System Purok', 'System Barangay', 'System Municipality', 'admin']
-      );
-    }
-
-    const [secretaryRows] = await connection.execute('SELECT * FROM users WHERE email = ?', ['secretary@lupon.com']);
-    if (secretaryRows.length === 0) {
-      await connection.execute(
-        `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['Secretary', 'System', '', 'secretary@lupon.com', secretaryPassword, '2000-01-01', 'Female', 'System Purok', 'System Barangay', 'System Municipality', 'secretary']
-      );
+      await insertUser(connection, {
+        last_name: 'Admin',
+        first_name: 'System',
+        middle_name: '',
+        email: 'admin@lupon.com',
+        password: adminPassword,
+        birth_date: '2000-01-01',
+        gender: 'Male',
+        purok: 'System Purok',
+        barangay: 'System Barangay',
+        municipality: 'System Municipality',
+        role: 'admin',
+      });
     }
 
     await connection.end();
-    res.json({ success: true, message: 'Admin and secretary accounts created successfully' });
+    res.json({ success: true, message: 'Admin account created successfully' });
   } catch (error) {
     console.error('Setup error:', error);
     res.status(500).json({ success: false, message: 'Setup failed', error: error.message });
@@ -175,13 +176,11 @@ exports.updatePasswords = async (req, res) => {
     const connection = await connectDB();
     const salt = await bcrypt.genSalt(10);
     const adminPassword = await bcrypt.hash('password123', salt);
-    const secretaryPassword = await bcrypt.hash('password123', salt);
 
-    await connection.execute('UPDATE users SET password = ? WHERE email = ?', [adminPassword, 'admin@lupon.com']);
-    await connection.execute('UPDATE users SET password = ? WHERE email = ?', [secretaryPassword, 'secretary@lupon.com']);
+    await updatePasswordByEmail(connection, 'admin@lupon.com', adminPassword);
 
     await connection.end();
-    res.json({ success: true, message: 'Admin and secretary passwords updated successfully' });
+    res.json({ success: true, message: 'Admin password updated successfully' });
   } catch (error) {
     console.error('Password update error:', error);
     res.status(500).json({ success: false, message: 'Password update failed', error: error.message });
@@ -226,35 +225,7 @@ INSERT INTO users (
     'System Province',
     'admin'
 );
-
--- Secretary Account
-INSERT INTO users (
-    last_name,
-    first_name,
-    middle_name,
-    email,
-    password,
-    birth_date,
-    gender,
-    address,
-    barangay,
-    city,
-    province,
-    role
-) VALUES (
-    'Secretary',
-    'System',
-    '',
-    'secretary2@lupon.com',
-    '${secretaryPassword}',
-    '2000-01-01',
-    'Female',
-    'System Address',
-    'System Barangay',
-    'System City',
-    'System Province',
-    'secretary'
-);`;
+`;
 
     res.json({ 
       success: true, 
@@ -262,7 +233,6 @@ INSERT INTO users (
       queries: queries,
       credentials: {
         admin: { email: 'administrator@lupon.com', password: 'admin123' },
-        secretary: { email: 'secretary2@lupon.com', password: 'secretary123' }
       }
     });
   } catch (error) {

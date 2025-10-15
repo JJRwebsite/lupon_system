@@ -361,7 +361,7 @@ function SetMediationModal({ open, onClose, onSubmit, caseData }: { open: boolea
                     
                     {slotInfo.isFull && (
                       <p className="text-sm text-red-600 mb-2">
-                        ⚠️ No slots available for this date. Please choose a different date.
+                         No slots available for this date. Please choose a different date.
                       </p>
                     )}
                     

@@ -1,99 +1,25 @@
 const connectDB = require('../config/db');
+const { getUserStatsData, getUserSchedulesData } = require('../models/userDashboardModel');
 
 // Get user dashboard statistics
 exports.getUserStats = async (req, res) => {
   try {
-    // Get user from JWT token (provided by verifyToken middleware)
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
-
     const userId = req.user.id;
-
     const connection = await connectDB();
-
-    // Get total cases for user (both as complainant/respondent and user_id)
-    const [totalCases] = await connection.execute(`
-      SELECT COUNT(*) as count FROM complaints 
-      WHERE (complainant_id = ? OR respondent_id = ? OR user_id = ?)
-    `, [userId, userId, userId]);
-
-    // Get pending cases
-    const [pendingCases] = await connection.execute(`
-      SELECT COUNT(*) as count FROM complaints 
-      WHERE status IN ('pending', 'ongoing', 'for_mediation', 'for_conciliation', 'for_arbitration')
-        AND (complainant_id = ? OR respondent_id = ? OR user_id = ?)
-    `, [userId, userId, userId]);
-
-    // Get settled cases
-    const [settledCases] = await connection.execute(`
-      SELECT COUNT(*) as count FROM complaints 
-      WHERE status IN ('settled', 'resolved')
-        AND (complainant_id = ? OR respondent_id = ? OR user_id = ?)
-    `, [userId, userId, userId]);
-
-    // Get upcoming mediation schedules
-    const [mediationSchedules] = await connection.execute(`
-      SELECT COUNT(*) as count FROM mediation m
-      JOIN complaints c ON m.complaint_id = c.id
-      WHERE m.date >= CURDATE()
-        AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
-    `, [userId, userId, userId]);
-
-    // Get total mediation sessions
-    const [totalMediation] = await connection.execute(`
-      SELECT COUNT(*) as count FROM mediation m
-      JOIN complaints c ON m.complaint_id = c.id
-      WHERE (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
-    `, [userId, userId, userId]);
-
-    // Get yearly case data for chart (current year)
-    const [yearlyData] = await connection.execute(`
-      SELECT 
-        MONTH(date_filed) as month,
-        COUNT(*) as count
-      FROM complaints 
-      WHERE YEAR(date_filed) = YEAR(CURDATE())
-        AND (complainant_id = ? OR respondent_id = ? OR user_id = ?)
-      GROUP BY MONTH(date_filed)
-      ORDER BY month
-    `, [userId, userId, userId]);
-
-    // Get case distribution by status
-    const [statusDistribution] = await connection.execute(`
-      SELECT 
-        status,
-        COUNT(*) as count
-      FROM complaints 
-      WHERE (complainant_id = ? OR respondent_id = ? OR user_id = ?)
-      GROUP BY status
-    `, [userId, userId, userId]);
-
-    // Get recent activities (latest 5 cases)
-    const [recentActivities] = await connection.execute(`
-      SELECT 
-        c.id,
-        c.case_title,
-        c.status,
-        c.date_filed,
-        'case_filed' as activity_type
-      FROM complaints c
-      WHERE (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
-      ORDER BY c.date_filed DESC
-      LIMIT 5
-    `, [userId, userId, userId]);
-
+    const data = await getUserStatsData(connection, userId);
     const stats = {
-      totalCases: totalCases[0].count,
-      pendingCases: pendingCases[0].count,
-      settledCases: settledCases[0].count,
-      mediationSchedules: mediationSchedules[0].count,
-      totalMediation: totalMediation[0].count,
-      yearlyData: yearlyData,
-      statusDistribution: statusDistribution,
-      recentActivities: recentActivities
+      totalCases: data.totalCases,
+      pendingCases: data.pendingCases,
+      settledCases: data.settledCases,
+      mediationSchedules: data.mediationSchedules,
+      totalMediation: data.totalMediation,
+      yearlyData: data.yearlyData,
+      statusDistribution: data.statusDistribution,
+      recentActivities: data.recentActivities,
     };
-
     res.json({ success: true, data: stats });
   } catch (error) {
     console.error('Error fetching user stats:', error);
@@ -104,16 +30,13 @@ exports.getUserStats = async (req, res) => {
 // Get user's upcoming schedules
 exports.getUserSchedules = async (req, res) => {
   try {
-    // Get user from JWT token (provided by verifyToken middleware)
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
-
     const userId = req.user.id;
-
     const connection = await connectDB();
-
-    // Get mediation schedules (exclude settled cases)
+    // Fetch schedules via model
+    const { mediationRows, conciliationRows, arbitrationRows } = await getUserSchedulesData(connection, userId);
     const [mediationSchedules] = await connection.execute(`
       SELECT 
         m.id,
@@ -135,43 +58,6 @@ exports.getUserSchedules = async (req, res) => {
         CASE 
           WHEN respondent.lastname IS NOT NULL AND respondent.firstname IS NOT NULL THEN 
             CONCAT(UPPER(respondent.lastname), ', ', UPPER(respondent.firstname), 
-                   CASE WHEN respondent.middlename IS NOT NULL AND respondent.middlename != '' 
-                        THEN CONCAT(' ', UPPER(respondent.middlename)) 
-                        ELSE '' END)
-          WHEN respondent.lastname IS NOT NULL THEN UPPER(respondent.lastname)
-          WHEN respondent.firstname IS NOT NULL THEN UPPER(respondent.firstname)
-          WHEN respondent.id IS NOT NULL THEN CONCAT('RESIDENT #', respondent.id)
-          ELSE 'UNKNOWN RESPONDENT'
-        END as respondent_name,
-        'mediation' as session_type
-      FROM mediation m
-      JOIN complaints c ON m.complaint_id = c.id
-      LEFT JOIN residents complainant ON c.complainant_id = complainant.id
-      LEFT JOIN residents respondent ON c.respondent_id = respondent.id
-      WHERE m.date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-        AND m.is_deleted = 0
-        AND c.status NOT IN ('Settled', 'withdrawn')
-        AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
-      ORDER BY m.date, m.time
-    `, [userId, userId, userId]);
-
-    // Get conciliation schedules (exclude settled cases)
-    const [conciliationSchedules] = await connection.execute(`
-      SELECT 
-        con.id,
-        con.date,
-        con.time,
-        c.case_title,
-        c.id as case_id,
-        CASE 
-          WHEN complainant.lastname IS NOT NULL AND complainant.firstname IS NOT NULL THEN 
-            CONCAT(UPPER(complainant.lastname), ', ', UPPER(complainant.firstname), 
-                   CASE WHEN complainant.middlename IS NOT NULL AND complainant.middlename != '' 
-                        THEN CONCAT(' ', UPPER(complainant.middlename)) 
-                        ELSE '' END)
-          WHEN complainant.lastname IS NOT NULL THEN UPPER(complainant.lastname)
-          WHEN complainant.firstname IS NOT NULL THEN UPPER(complainant.firstname)
-          WHEN complainant.id IS NOT NULL THEN CONCAT('RESIDENT #', complainant.id)
           ELSE 'UNKNOWN COMPLAINANT'
         END as complainant_name,
         CASE 
