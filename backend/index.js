@@ -125,7 +125,7 @@ const dbConfig = {
 };
 
 app.get("/", (req, res) => {
-  res.send("Hello Lupon!");
+  res.send("Hello Lupons!");
 });
 
 // Test DB Connection Route
