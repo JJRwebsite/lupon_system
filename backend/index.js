@@ -124,6 +124,10 @@ const dbConfig = {
   database: process.env.DB_NAME || 'lupon_system'
 };
 
+app.get("/", (req, res) => {
+  res.send("Hello Lupon!");
+});
+
 // Test DB Connection Route
 app.get('/api/test-db', async (req, res) => {
   try {
