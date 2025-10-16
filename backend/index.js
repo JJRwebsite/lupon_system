@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const mysql = require('mysql2/promise');
 const bcrypt = require('bcryptjs');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -82,6 +81,9 @@ const notificationsRoutes = require('./routes/notifications');
 const pdfRoutes = require('./routes/pdf');
 const backupRoutes = require('./routes/backup');
 const sqlExportRoutes = require('./routes/sqlExport');
+const { bootstrapCoreTables } = require('./migrations/bootstrapCoreTables');
+const { bootstrapMoreTables } = require('./migrations/bootstrapMoreTables');
+const connectDB = require('./config/db');
 
 
 
@@ -104,25 +106,8 @@ app.use('/api/pdf', pdfRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/sql-export', sqlExportRoutes);
 
-
-
-// Add status column to complaints table
-complaintsController.addStatusColumn().catch(console.error);
-
-
-
-// Create referrals table
-referralsController.createReferralsTable().catch(console.error);
-
-
-
-// Database connection configuration
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'lupon_system'
-};
+// Serve uploaded files (documentation, etc.)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.get("/", (req, res) => {
   res.send("Hello Lupons!");
@@ -131,33 +116,28 @@ app.get("/", (req, res) => {
 // Test DB Connection Route
 app.get('/api/test-db', async (req, res) => {
   try {
-    const connection = await mysql.createConnection(dbConfig);
-    const [tables] = await connection.execute('SHOW TABLES LIKE "users"');
-
-    if (tables.length === 0) {
-      await connection.execute(`
-        CREATE TABLE IF NOT EXISTS users (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          last_name VARCHAR(255) NOT NULL,
-          first_name VARCHAR(255) NOT NULL,
-          middle_name VARCHAR(255),
-          email VARCHAR(255) NOT NULL UNIQUE,
-          password VARCHAR(255) NOT =>',
-          birth_date DATE NOT NULL,
-          gender VARCHAR(50) NOT NULL,
-          address TEXT NOT NULL,
-          barangay VARCHAR(255) NOT NULL,
-          city VARCHAR(255) NOT NULL,
-          province VARCHAR(255) NOT NULL,
-          role VARCHAR(50) NOT NULL DEFAULT 'user',
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-      `);
-    }
-
-    await connection.end();
-    res.json({ success: true, message: 'Database connection successful and users table verified' });
+    const connection = await connectDB();
+    // Ensure users exists (idempotent)
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        last_name VARCHAR(255) NOT NULL,
+        first_name VARCHAR(255) NOT NULL,
+        middle_name VARCHAR(255),
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        birth_date DATE NOT NULL,
+        gender VARCHAR(50) NOT NULL,
+        purok TEXT NOT NULL DEFAULT '',
+        barangay VARCHAR(255) NOT NULL,
+        municipality VARCHAR(100) NOT NULL DEFAULT '',
+        province VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'user',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    res.json({ success: true, message: 'Database connection successful and users table verified (PostgreSQL)' });
   } catch (error) {
     console.error('Database test error:', error);
     res.status(500).json({ success: false, message: 'Database connection failed', error: error.message });
@@ -167,7 +147,7 @@ app.get('/api/test-db', async (req, res) => {
 // Setup Admin/Secretary Accounts Route
 app.get('/api/setup', async (req, res) => {
   try {
-    const connection = await mysql.createConnection(dbConfig);
+    const connection = await connectDB();
     const salt = await bcrypt.genSalt(10);
     const adminPassword = await bcrypt.hash('password123', salt);
     const secretaryPassword = await bcrypt.hash('password123', salt);
@@ -175,7 +155,8 @@ app.get('/api/setup', async (req, res) => {
     const [adminRows] = await connection.execute('SELECT * FROM users WHERE email = ?', ['admin@lupon.com']);
     if (adminRows.length === 0) {
       await connection.execute(
-        `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, address, barangay, city, province, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, province, role)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ['Admin', 'System', '', 'admin@lupon.com', adminPassword, '2000-01-01', 'Male', 'System Address', 'System Barangay', 'System City', 'System Province', 'admin']
       );
     }
@@ -183,12 +164,12 @@ app.get('/api/setup', async (req, res) => {
     const [secretaryRows] = await connection.execute('SELECT * FROM users WHERE email = ?', ['secretary@lupon.com']);
     if (secretaryRows.length === 0) {
       await connection.execute(
-        `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, address, barangay, city, province, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, province, role)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ['Secretary', 'System', '', 'secretary@lupon.com', secretaryPassword, '2000-01-01', 'Female', 'System Address', 'System Barangay', 'System City', 'System Province', 'secretary']
       );
     }
 
-    await connection.end();
     res.json({ success: true, message: 'Admin and secretary accounts created successfully' });
   } catch (error) {
     console.error('Setup error:', error);
@@ -209,13 +190,12 @@ app.post('/api/register', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const connection = await mysql.createConnection(dbConfig);
-    const [result] = await connection.execute(
-      `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, address, barangay, city, province, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [lastName, firstName, middleName, email, hashedPassword, birthDate, gender, address, barangay, city, province, role]
+    const connection = await connectDB();
+    await connection.execute(
+      `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, province, role)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [lastName, firstName, middleName, email, hashedPassword, birthDate, gender, address || '', barangay, city || '', province, role]
     );
-
-    await connection.end();
     res.json({ success: true, message: 'User registered successfully' });
   } catch (error) {
     console.error('Registration error:', error);
@@ -230,9 +210,8 @@ app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
     console.log('Login attempt for email:', email);
 
-    const connection = await mysql.createConnection(dbConfig);
+    const connection = await connectDB();
     const [rows] = await connection.execute('SELECT * FROM users WHERE email = ?', [email]);
-    await connection.end();
 
     if (rows.length === 0) {
       console.log('No user found with email:', email);
@@ -270,13 +249,49 @@ const { migrateUsersTable } = require('./migrations/migrateUsersTable');
 const server = app.listen(PORT, () => {
   console.log(`Express.js server running on port ${PORT}`);
   
-  // Run database migration in background without blocking server
-  setTimeout(() => {
-    migrateUsersTable().catch(error => {
-      console.error('Migration failed:', error);
-      // Don't let migration errors crash the server
-    });
-  }, 1000);
+  // Ensure core tables exist first, then run other migrations in the background
+  (async () => {
+    try {
+      await bootstrapCoreTables();
+      await bootstrapMoreTables();
+      // Auto-seed default users if missing
+      try {
+        const connection = await connectDB();
+        const salt = await bcrypt.genSalt(10);
+        const adminPassword = await bcrypt.hash('password123', salt);
+        const secretaryPassword = await bcrypt.hash('password123', salt);
+        const [adminRows] = await connection.execute('SELECT id FROM users WHERE email = ?', ['admin@lupon.com']);
+        if (adminRows.length === 0) {
+          await connection.execute(
+            `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, province, role)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ['Admin', 'System', '', 'admin@lupon.com', adminPassword, '2000-01-01', 'Male', 'System Purok', 'System Barangay', 'System City', 'System Province', 'admin']
+          );
+        }
+        const [secRows] = await connection.execute('SELECT id FROM users WHERE email = ?', ['secretary@lupon.com']);
+        if (secRows.length === 0) {
+          await connection.execute(
+            `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, province, role)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ['Secretary', 'System', '', 'secretary@lupon.com', secretaryPassword, '2000-01-01', 'Female', 'System Purok', 'System Barangay', 'System City', 'System Province', 'secretary']
+          );
+        }
+      } catch (seedErr) {
+        console.error('User auto-seed error (non-fatal):', seedErr.message);
+      }
+      await complaintsController.addStatusColumn();
+      await referralsController.createReferralsTable();
+    } catch (e) {
+      console.error('Post-bootstrap migrations failed:', e);
+    }
+    // Run follow-up migration (users column changes) without blocking
+    setTimeout(() => {
+      migrateUsersTable().catch(error => {
+        console.error('Migration failed:', error);
+        // Don't let migration errors crash the server
+      });
+    }, 500);
+  })();
 });
 
 // Handle server shutdown gracefully

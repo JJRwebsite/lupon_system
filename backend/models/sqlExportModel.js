@@ -2,19 +2,20 @@ const connectDB = require('../config/db');
 
 // Get all table names from the database
 const getAllTables = async (connection) => {
-  const [tables] = await connection.execute('SHOW TABLES');
-  return tables.map(table => Object.values(table)[0]);
+  const [tables] = await connection.execute(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_type = 'BASE TABLE'
+    ORDER BY table_name
+  `);
+  return tables.map(row => row.table_name);
 };
 
 // Generate CREATE TABLE statement for a table
 const getCreateTableStatement = async (connection, tableName) => {
-  try {
-    const [result] = await connection.execute(`SHOW CREATE TABLE \`${tableName}\``);
-    return result[0]['Create Table'] + ';';
-  } catch (error) {
-    console.error(`Error getting CREATE statement for table ${tableName}:`, error);
-    return `-- Error: Could not generate CREATE statement for table ${tableName}`;
-  }
+  // PostgreSQL does not support SHOW CREATE TABLE; implement later if needed via pg_catalog
+  return `-- CREATE TABLE for ${tableName} not implemented for PostgreSQL export`;
 };
 
 // Helper function to get date range based on interval
@@ -48,7 +49,7 @@ const getDateRange = (intervalType, dateValue) => {
 // Generate INSERT statements for a table with optional date filtering
 const getInsertStatements = async (connection, tableName, dateFilter = null) => {
   try {
-    let query = `SELECT * FROM \`${tableName}\``;
+    let query = `SELECT * FROM ${tableName}`;
     let queryParams = [];
     
     // Apply date filtering for specific tables
@@ -89,7 +90,7 @@ const getInsertStatements = async (connection, tableName, dateFilter = null) => 
     }
 
     const columns = Object.keys(rows[0]);
-    const columnNames = columns.map(col => `\`${col}\``).join(', ');
+    const columnNames = columns.join(', ');
     
     let insertStatements = [];
     
@@ -107,7 +108,7 @@ const getInsertStatements = async (connection, tableName, dateFilter = null) => 
         return value;
       }).join(', ');
       
-      insertStatements.push(`INSERT INTO \`${tableName}\` (${columnNames}) VALUES (${values});`);
+      insertStatements.push(`INSERT INTO ${tableName} (${columnNames}) VALUES (${values});`);
     }
     
     return insertStatements.join('\n');

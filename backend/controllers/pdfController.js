@@ -2077,10 +2077,12 @@ async function generateCFAPDF(req, res) {
         // Fetch complaint with resident details
         const [complaints] = await connection.execute(`
           SELECT c.*, 
-                 comp.name as complainant_name,
+                 TRIM(CONCAT(UPPER(COALESCE(comp.lastname,'')), ', ', UPPER(COALESCE(comp.firstname,'')),
+                   CASE WHEN COALESCE(comp.middlename,'') <> '' THEN CONCAT(' ', UPPER(comp.middlename)) ELSE '' END)) AS complainant_name,
                  comp.purok as complainant_purok,
                  comp.barangay as complainant_barangay,
-                 resp.name as respondent_name,
+                 TRIM(CONCAT(UPPER(COALESCE(resp.lastname,'')), ', ', UPPER(COALESCE(resp.firstname,'')),
+                   CASE WHEN COALESCE(resp.middlename,'') <> '' THEN CONCAT(' ', UPPER(resp.middlename)) ELSE '' END)) AS respondent_name,
                  resp.purok as respondent_purok,
                  resp.barangay as respondent_barangay
           FROM complaints c

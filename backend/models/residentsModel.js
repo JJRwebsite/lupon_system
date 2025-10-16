@@ -94,7 +94,8 @@ async function getAllResidents() {
   const connection = await connectDB();
   try {
     const [residents] = await connection.execute(
-      'SELECT *, CONCAT(COALESCE(lastname, ""), ", ", COALESCE(firstname, ""), " ", COALESCE(middlename, "")) as display_name FROM residents ORDER BY lastname ASC, firstname ASC'
+      `SELECT *, CONCAT(COALESCE(lastname, ''), ', ', COALESCE(firstname, ''), ' ', COALESCE(middlename, '')) as display_name
+       FROM residents ORDER BY lastname ASC, firstname ASC`
     );
     return residents.map(r => ({ ...r, display_name: formatDisplayName(r.firstname, r.lastname, r.middlename) }));
   } finally {
@@ -106,9 +107,9 @@ async function searchResidents(query) {
   const connection = await connectDB();
   try {
     const [residents] = await connection.execute(
-      `SELECT *, CONCAT(COALESCE(lastname, ''), ", ", COALESCE(firstname, ''), " ", COALESCE(middlename, '')) as display_name
+      `SELECT *, CONCAT(COALESCE(lastname, ''), ', ', COALESCE(firstname, ''), ' ', COALESCE(middlename, '')) as display_name
        FROM residents 
-       WHERE firstname LIKE ? OR lastname LIKE ? OR middlename LIKE ? 
+       WHERE firstname ILIKE ? OR lastname ILIKE ? OR middlename ILIKE ? 
        ORDER BY lastname ASC, firstname ASC LIMIT 10`,
       [
         `%${query}%`,
@@ -126,7 +127,8 @@ async function getResidentById(id) {
   const connection = await connectDB();
   try {
     const [rows] = await connection.execute(
-      'SELECT *, CONCAT(COALESCE(lastname, ""), ", ", COALESCE(firstname, ""), " ", COALESCE(middlename, "")) as display_name FROM residents WHERE id = ?',
+      `SELECT *, CONCAT(COALESCE(lastname, ''), ', ', COALESCE(firstname, ''), ' ', COALESCE(middlename, '')) as display_name
+       FROM residents WHERE id = ?`,
       [id]
     );
     if (rows.length === 0) return null;

@@ -157,7 +157,7 @@ const getDatabaseSummary = async (req, res) => {
     let totalRecords = 0;
     
     for (const table of tables) {
-      const [countResult] = await connection.execute(`SELECT COUNT(*) as count FROM \`${table}\``);
+      const [countResult] = await connection.execute(`SELECT COUNT(*) as count FROM ${table}`);
       const count = countResult[0].count;
       totalRecords += count;
       

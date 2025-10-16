@@ -34,5 +34,6 @@ router.get('/available-slots/:date', mediationController.getAvailableSlots);
 router.post('/session', upload.array('photos'), mediationController.saveMediationSession);
 router.put('/session/:id/soft-delete', mediationController.softDeleteSession);
 router.post('/reschedule', mediationController.rescheduleMediation);
+router.post('/cleanup-documentation', mediationController.cleanupDocumentationIds);
 
 module.exports = router;

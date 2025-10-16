@@ -56,15 +56,35 @@ async function listUserConciliationSchedulesDetailed(connection, userId) {
 }
 
 async function getCombinedSchedulesForDate(connection, date) {
+  // Get mediation schedules (main table only for now)
   const [mediation] = await connection.execute(
-    'SELECT complaint_id, time FROM mediation WHERE date = ? AND is_deleted = 0',
+    'SELECT complaint_id, time FROM mediation WHERE date = ? AND is_deleted = FALSE',
     [date]
   );
+  
+  // Get conciliation schedules from main table
   const [conciliation] = await connection.execute(
     'SELECT id, complaint_id, time FROM conciliation WHERE date = ?',
     [date]
   );
-  return { mediation, conciliation };
+  
+  // Get conciliation reschedule sessions for the same date
+  const [conciliationReschedules] = await connection.execute(
+    'SELECT conciliation_id as id, conciliation_id as complaint_id, reschedule_time as time FROM conciliation_reschedule WHERE reschedule_date = ?',
+    [date]
+  );
+  
+  // Get mediation reschedule sessions for the same date
+  const [mediationReschedules] = await connection.execute(
+    'SELECT mediation_id as id, mediation_id as complaint_id, reschedule_time as time FROM mediation_reschedule WHERE reschedule_date = ?',
+    [date]
+  );
+  
+  // Combine all schedules
+  const allMediationSchedules = [...mediation, ...mediationReschedules];
+  const allConciliationSchedules = [...conciliation, ...conciliationReschedules];
+  
+  return { mediation: allMediationSchedules, conciliation: allConciliationSchedules };
 }
 
 // Create/update conciliation schedule with combined (mediation+conciliation) validations
@@ -118,8 +138,8 @@ async function setConciliationScheduleDb(connection, { complaint_id, date, time,
 async function listAllConciliationsBasic(connection) {
   const [rows] = await connection.execute(`
     SELECT con.id, con.complaint_id,
-           DATE_FORMAT(con.date, '%Y-%m-%d') AS date,
-           con.time, con.created_at, c.case_title, c.status,
+           to_char(con.date, 'YYYY-MM-DD') AS date,
+           con.time, con.created_at, con.minutes, con.lupon_panel, c.case_title, c.status,
            TRIM(CONCAT(UPPER(COALESCE(comp.lastname,'')), ', ', UPPER(COALESCE(comp.firstname,'')),
              CASE WHEN COALESCE(comp.middlename,'') <> '' THEN CONCAT(' ', UPPER(comp.middlename)) ELSE '' END)) AS complainant,
            TRIM(CONCAT(UPPER(COALESCE(resp.lastname,'')), ', ', UPPER(COALESCE(resp.firstname,'')),
@@ -137,17 +157,64 @@ async function listAllConciliationsBasic(connection) {
   return rows;
 }
 
+// Save conciliation session with reschedule-based architecture
 async function saveConciliationSessionDb(connection, { conciliation_id, minutes, files = [] }) {
-  if (minutes && minutes.trim()) {
-    await connection.execute('UPDATE conciliation SET minutes = ? WHERE id = ?', [minutes, conciliation_id]);
+  // Insert documentation files first and collect their IDs
+  const documentationIds = [];
+  for (const file of files) {
+    if (file && file.filename) {
+      const cleanPath = `uploads/conciliation/${file.filename}`;
+      
+      const [rows] = await connection.execute(
+        'INSERT INTO conciliation_documentation (conciliation_id, file_path) VALUES (?, ?) RETURNING id',
+        [conciliation_id, cleanPath]
+      );
+      
+      const newId = Array.isArray(rows) && rows.length > 0 ? rows[0].id : null;
+      if (newId) {
+        documentationIds.push(newId);
+      }
+    }
   }
-  for (const filePath of files) {
+  
+  // Convert documentation IDs to JSON string for storage
+  const cleanedDocumentationIds = documentationIds.filter(id => id !== null && id !== undefined);
+  const documentationIdsJson = JSON.stringify(cleanedDocumentationIds);
+  
+  // Find the most recent reschedule session for this conciliation
+  // This ensures we save to the current active session (e.g., "Reschedule #1") not the initial session
+  const [latestReschedule] = await connection.execute(
+    'SELECT id, reschedule_date, reschedule_time FROM conciliation_reschedule WHERE conciliation_id = ? ORDER BY created_at DESC LIMIT 1',
+    [conciliation_id]
+  );
+  
+  if (latestReschedule.length > 0) {
+    // Update the most recent reschedule session with minutes and documentation IDs
     await connection.execute(
-      'INSERT INTO conciliation_documentation (conciliation_id, file_path) VALUES (?, ?)',
-      [conciliation_id, filePath]
+      'UPDATE conciliation_reschedule SET minutes = ?, documentation_id = ? WHERE id = ?',
+      [minutes, documentationIdsJson, latestReschedule[0].id]
     );
+    return latestReschedule[0].id;
+  } else {
+    // No reschedule sessions exist, get main conciliation date/time and create initial session
+    const [conciliation] = await connection.execute(
+      'SELECT date, time FROM conciliation WHERE id = ?',
+      [conciliation_id]
+    );
+    
+    if (conciliation.length === 0) {
+      throw new Error('Conciliation not found');
+    }
+    
+    const { date, time } = conciliation[0];
+    
+    // Create new reschedule record for initial session with documentation IDs
+    const [result] = await connection.execute(
+      'INSERT INTO conciliation_reschedule (conciliation_id, reschedule_date, reschedule_time, minutes, reason, documentation_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+      [conciliation_id, date, time, minutes, 'Initial session', documentationIdsJson]
+    );
+    return result[0].id;
   }
-  return true;
 }
 
 async function softDeleteConciliationDb(connection, conciliation_id) {
@@ -168,29 +235,40 @@ async function rescheduleConciliationDb(connection, { conciliation_id, reschedul
   return complaint_id;
 }
 
-async function getAvailableSlotsDetails(connection, date, excludeConciliationId = null) {
-  const { mediation, conciliation } = await getCombinedSchedulesForDate(connection, date);
-  const mediationTimes = mediation.map(s => s.time);
-  const filteredConciliation = excludeConciliationId
-    ? conciliation.filter(s => String(s.id) !== String(excludeConciliationId))
-    : conciliation;
-  const conciliationTimes = filteredConciliation.map(s => s.time);
+// Returns all booked times across mediation, conciliation, arbitration for a given date
+async function getBookedTimesForDate(connection, date) {
+  const [mediationSchedules] = await connection.execute(
+    'SELECT time FROM mediation WHERE date = ? AND is_deleted = FALSE',
+    [date]
+  );
+  const [conciliationSchedules] = await connection.execute(
+    'SELECT time FROM conciliation WHERE date = ?',
+    [date]
+  );
+  const [arbitrationSchedules] = await connection.execute(
+    'SELECT time FROM arbitration WHERE date = ? AND is_deleted = FALSE',
+    [date]
+  );
 
-  const allTimeSlots = ['08:00','09:00','10:00','11:00','13:00','14:00','15:00','16:00','17:00','18:00'];
-  const allBookedTimes = [...mediationTimes, ...conciliationTimes];
-  const bookedTimes = [...new Set(allBookedTimes)];
-  const availableSlots = allTimeSlots.filter(t => !bookedTimes.includes(t));
+  const mediationTimes = mediationSchedules.map(r => r.time);
+  const conciliationTimes = conciliationSchedules.map(r => r.time);
+  const arbitrationTimes = arbitrationSchedules.map(r => r.time);
+  const all = [...mediationTimes, ...conciliationTimes, ...arbitrationTimes];
+  return [...new Set(all)];
+}
+
+// Compute available slots meta for a date
+async function getAvailableSlotsDetails(connection, date) {
+  const allTimeSlots = [
+    '08:00', '09:00', '10:00', '11:00',
+    '13:00', '14:00', '15:00', '16:00', '17:00', '18:00',
+  ];
+  const bookedTimes = await getBookedTimesForDate(connection, date);
+  const availableTimes = allTimeSlots.filter(t => !bookedTimes.includes(t));
   const usedSlots = bookedTimes.length;
   const maxSlotsPerDay = 4;
   const isFull = usedSlots >= maxSlotsPerDay;
-
-  // actualUsedSlots without exclusion for display purposes
-  let actualUsedSlots = usedSlots;
-  if (excludeConciliationId) {
-    const actualBookedTimes = [...new Set([...mediationTimes, ...conciliation.map(s => s.time)])];
-    actualUsedSlots = actualBookedTimes.length;
-  }
-  return { availableSlotsLen: availableSlots.length, usedSlots, actualUsedSlots, maxSlotsPerDay, bookedTimes, isFull };
+  return { availableTimes, bookedTimes, usedSlots, maxSlotsPerDay, isFull };
 }
 
 module.exports = {

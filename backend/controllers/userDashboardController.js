@@ -58,6 +58,43 @@ exports.getUserSchedules = async (req, res) => {
         CASE 
           WHEN respondent.lastname IS NOT NULL AND respondent.firstname IS NOT NULL THEN 
             CONCAT(UPPER(respondent.lastname), ', ', UPPER(respondent.firstname), 
+                   CASE WHEN respondent.middlename IS NOT NULL AND respondent.middlename != '' 
+                        THEN CONCAT(' ', UPPER(respondent.middlename)) 
+                        ELSE '' END)
+          WHEN respondent.lastname IS NOT NULL THEN UPPER(respondent.lastname)
+          WHEN respondent.firstname IS NOT NULL THEN UPPER(respondent.firstname)
+          WHEN respondent.id IS NOT NULL THEN CONCAT('RESIDENT #', respondent.id)
+          ELSE 'UNKNOWN RESPONDENT'
+        END as respondent_name,
+        NULL as panel_members,
+        'mediation' as session_type
+      FROM mediation m
+      JOIN complaints c ON m.complaint_id = c.id
+      LEFT JOIN residents complainant ON c.complainant_id = complainant.id
+      LEFT JOIN residents respondent ON c.respondent_id = respondent.id
+      WHERE m.date >= (CURRENT_DATE - INTERVAL '1 day')
+        AND c.status NOT IN ('Settled', 'withdrawn')
+        AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
+      ORDER BY m.date, m.time
+    `, [userId, userId, userId]);
+
+    // Get conciliation schedules (exclude settled cases)
+    const [conciliationSchedules] = await connection.execute(`
+      SELECT 
+        con.id,
+        con.date,
+        con.time,
+        c.case_title,
+        c.id as case_id,
+        CASE 
+          WHEN complainant.lastname IS NOT NULL AND complainant.firstname IS NOT NULL THEN 
+            CONCAT(UPPER(complainant.lastname), ', ', UPPER(complainant.firstname), 
+                   CASE WHEN complainant.middlename IS NOT NULL AND complainant.middlename != '' 
+                        THEN CONCAT(' ', UPPER(complainant.middlename)) 
+                        ELSE '' END)
+          WHEN complainant.lastname IS NOT NULL THEN UPPER(complainant.lastname)
+          WHEN complainant.firstname IS NOT NULL THEN UPPER(complainant.firstname)
+          WHEN complainant.id IS NOT NULL THEN CONCAT('RESIDENT #', complainant.id)
           ELSE 'UNKNOWN COMPLAINANT'
         END as complainant_name,
         CASE 
@@ -77,7 +114,7 @@ exports.getUserSchedules = async (req, res) => {
       JOIN complaints c ON con.complaint_id = c.id
       LEFT JOIN residents complainant ON c.complainant_id = complainant.id
       LEFT JOIN residents respondent ON c.respondent_id = respondent.id
-      WHERE con.date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+      WHERE con.date >= (CURRENT_DATE - INTERVAL '1 day')
         AND c.status NOT IN ('Settled', 'withdrawn')
         AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
       ORDER BY con.date, con.time
@@ -119,8 +156,8 @@ exports.getUserSchedules = async (req, res) => {
       JOIN complaints c ON a.complaint_id = c.id
       LEFT JOIN residents complainant ON c.complainant_id = complainant.id
       LEFT JOIN residents respondent ON c.respondent_id = respondent.id
-      WHERE a.date >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
-        AND a.is_deleted = 0
+      WHERE a.date >= (CURRENT_DATE - INTERVAL '1 day')
+        AND a.is_deleted = false
         AND c.status NOT IN ('Settled', 'withdrawn')
         AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)
       ORDER BY a.date, a.time

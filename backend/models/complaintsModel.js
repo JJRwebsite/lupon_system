@@ -5,7 +5,7 @@ async function getNextComplaintId(connection) {
   const currentYear = new Date().getFullYear();
   const yearPrefix = currentYear.toString();
   const [existingYearIds] = await connection.execute(
-    'SELECT id FROM complaints WHERE id LIKE ? ORDER BY id DESC LIMIT 1',
+    'SELECT id FROM complaints WHERE CAST(id AS TEXT) LIKE ? ORDER BY id::BIGINT DESC LIMIT 1',
     [`${yearPrefix}%`]
   );
   if (existingYearIds.length === 0) {
@@ -78,9 +78,9 @@ async function listUserComplaintsDetailed(connection, userId) {
     LEFT JOIN residents comp ON c.complainant_id = comp.id
     LEFT JOIN residents resp ON c.respondent_id = resp.id
     LEFT JOIN residents wit ON c.witness_id = wit.id
-    WHERE (c.complainant_id = ? OR c.respondent_id = ?) AND c.status IS NOT NULL
+    WHERE (c.user_id = ? OR c.complainant_id = ? OR c.respondent_id = ?) AND c.status IS NOT NULL
     ORDER BY c.id DESC
-  `, [userId, userId]);
+  `, [userId, userId, userId]);
 
   const formattedComplaints = complaints.map((complaint) => {
     let complainants = [];
@@ -162,6 +162,17 @@ async function listUserSchedulesDetailed(connection, userId) {
 
 // Set complaint as withdrawn with timestamp
 async function withdrawComplaintStatus(connection, complaintId) {
+  // First ensure the date_withdrawn column exists
+  try {
+    await connection.execute(`
+      ALTER TABLE complaints ADD COLUMN IF NOT EXISTS date_withdrawn TIMESTAMP
+    `);
+  } catch (error) {
+    // Column might already exist, continue
+    console.log('date_withdrawn column already exists or error adding:', error.message);
+  }
+  
+  // Now update the complaint status
   await connection.execute(
     `UPDATE complaints SET status = 'withdrawn', date_withdrawn = NOW() WHERE id = ?`,
     [complaintId]
@@ -171,7 +182,23 @@ async function withdrawComplaintStatus(connection, complaintId) {
 // Replicates controller's complex SELECT for withdrawn complaints
 async function listWithdrawnComplaintsDetailed(connection) {
   const [complaints] = await connection.execute(`
-    SELECT c.*, 
+    SELECT 
+           c.id,
+           COALESCE(c.case_title, 'Untitled Case') AS case_title,
+           c.case_description,
+           c.nature_of_case,
+           c.relief_description,
+           c.status,
+           c.user_id,
+           c.created_at,
+           c.date_filed,
+           c.date_withdrawn,
+           to_char(c.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS created_at_iso,
+           to_char(c.date_filed, 'YYYY-MM-DD"T"HH24:MI:SS') AS date_filed_iso,
+           to_char(c.date_withdrawn, 'YYYY-MM-DD"T"HH24:MI:SS') AS date_withdrawn_iso,
+           c.complainant_id,
+           c.respondent_id,
+           c.witness_id,
            CASE 
              WHEN comp.lastname IS NOT NULL AND comp.firstname IS NOT NULL THEN 
                CONCAT(UPPER(comp.lastname), ', ', UPPER(comp.firstname), 
@@ -356,6 +383,7 @@ async function listComplaintsDetailed(connection) {
       complainants = [{
         id: complaint.complainant_id,
         display_name: complaint.complainant_name,
+        name: complaint.complainant_name,
         purok: complaint.complainant_purok,
         contact: complaint.complainant_contact,
         barangay: complaint.complainant_barangay,
@@ -365,6 +393,7 @@ async function listComplaintsDetailed(connection) {
       respondents = [{
         id: complaint.respondent_id,
         display_name: complaint.respondent_name,
+        name: complaint.respondent_name,
         purok: complaint.respondent_purok,
         contact: complaint.respondent_contact,
         barangay: complaint.respondent_barangay,
@@ -374,6 +403,7 @@ async function listComplaintsDetailed(connection) {
       witnesses = [{
         id: complaint.witness_id,
         display_name: complaint.witness_name,
+        name: complaint.witness_name,
         purok: complaint.witness_purok,
         contact: complaint.witness_contact,
         barangay: complaint.witness_barangay,
@@ -482,20 +512,7 @@ async function listPendingComplaintsDetailed(connection) {
       witnesses,
       complainant: complainants.length > 0 ? complainants[0] : null,
       respondent: respondents.length > 0 ? respondents[0] : null,
-      witness: witnesses.length > 0 ? witnesses[0] : null,
-      // Remove duplicate fields on the consumer side if needed
-      complainant_name: undefined,
-      complainant_purok: undefined,
-      complainant_contact: undefined,
-      complainant_barangay: undefined,
-      respondent_name: undefined,
-      respondent_purok: undefined,
-      respondent_contact: undefined,
-      respondent_barangay: undefined,
-      witness_name: undefined,
-      witness_purok: undefined,
-      witness_contact: undefined,
-      witness_barangay: undefined,
+      witness: witnesses.length > 0 ? witnesses[0] : null
     };
   });
 
@@ -507,22 +524,28 @@ async function listComplaints() {
   const connection = await connectDB();
   try {
     const [rows] = await connection.execute(`
-    SELECT 
-      c.id, 
-      c.case_title, 
-      c.case_description, 
-      c.nature_of_case, 
-      c.relief_description, 
-      c.status, 
-      c.user_id,
-      JSON_OBJECTAGG(r.id, r.name) AS parties
-    FROM 
-      complaints c
-    LEFT JOIN 
-      residents r ON c.complainant_id = r.id OR c.respondent_id = r.id
-    GROUP BY 
-      c.id
-  `);
+      SELECT 
+        c.id,
+        COALESCE(c.case_title, 'Untitled Case') AS case_title,
+        c.case_description,
+        c.nature_of_case,
+        c.relief_description,
+        c.status,
+        c.user_id,
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'id', r.id,
+            'display_name', TRIM(CONCAT(
+              UPPER(COALESCE(r.lastname,'')), ', ', UPPER(COALESCE(r.firstname,'')),
+              CASE WHEN COALESCE(r.middlename,'') <> '' THEN CONCAT(' ', UPPER(r.middlename)) ELSE '' END
+            ))
+          )
+        ) FILTER (WHERE r.id IS NOT NULL) AS parties
+      FROM complaints c
+      LEFT JOIN residents r ON (c.complainant_id = r.id OR c.respondent_id = r.id)
+      GROUP BY c.id
+      ORDER BY c.id DESC
+    `);
     return rows;
   } finally {
     await connection.end();
@@ -534,24 +557,29 @@ async function listPendingComplaints() {
   const connection = await connectDB();
   try {
     const [rows] = await connection.execute(`
-    SELECT 
-      c.id, 
-      c.case_title, 
-      c.case_description, 
-      c.nature_of_case, 
-      c.relief_description, 
-      c.status, 
-      c.user_id,
-      JSON_OBJECTAGG(r.id, r.name) AS parties
-    FROM 
-      complaints c
-    LEFT JOIN 
-      residents r ON c.complainant_id = r.id OR c.respondent_id = r.id
-    WHERE 
-      c.status = 'pending'
-    GROUP BY 
-      c.id
-  `);
+      SELECT 
+        c.id,
+        COALESCE(c.case_title, 'Untitled Case') AS case_title,
+        c.case_description,
+        c.nature_of_case,
+        c.relief_description,
+        c.status,
+        c.user_id,
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'id', r.id,
+            'display_name', TRIM(CONCAT(
+              UPPER(COALESCE(r.lastname,'')), ', ', UPPER(COALESCE(r.firstname,'')),
+              CASE WHEN COALESCE(r.middlename,'') <> '' THEN CONCAT(' ', UPPER(r.middlename)) ELSE '' END
+            ))
+          )
+        ) FILTER (WHERE r.id IS NOT NULL) AS parties
+      FROM complaints c
+      LEFT JOIN residents r ON (c.complainant_id = r.id OR c.respondent_id = r.id)
+      WHERE c.status = 'pending'
+      GROUP BY c.id
+      ORDER BY c.id DESC
+    `);
     return rows;
   } finally {
     await connection.end();

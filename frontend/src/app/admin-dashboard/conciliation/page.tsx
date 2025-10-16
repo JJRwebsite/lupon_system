@@ -30,6 +30,48 @@ function getSortedSessions(sessions: ConciliationSession[]): ConciliationSession
   return [...sessions].sort((a, b) => a.id - b.id);
 }
 
+// Helper function to calculate time elapsed from scheduled date
+function calculateTimeElapseFromSchedule(conciliationGroup: any[]): number {
+  // Find the earliest scheduled date from all conciliation sessions
+  let earliestScheduledDate: string | null = null;
+  
+  conciliationGroup.forEach(con => {
+    // Check if this conciliation has reschedules with scheduled dates
+    if (con.reschedules && Array.isArray(con.reschedules)) {
+      con.reschedules.forEach((reschedule: any) => {
+        if (reschedule.reschedule_date) {
+          if (!earliestScheduledDate || new Date(reschedule.reschedule_date) < new Date(earliestScheduledDate)) {
+            earliestScheduledDate = reschedule.reschedule_date;
+          }
+        }
+      });
+    }
+    
+    // Also check the main conciliation date as fallback
+    if (con.date) {
+      if (!earliestScheduledDate || new Date(con.date) < new Date(earliestScheduledDate)) {
+        earliestScheduledDate = con.date;
+      }
+    }
+  });
+  
+  // Calculate days elapsed from earliest scheduled date
+  let daysElapsed = 0;
+  if (earliestScheduledDate) {
+    const today = new Date();
+    const scheduled = new Date(earliestScheduledDate);
+    today.setHours(0, 0, 0, 0);
+    scheduled.setHours(0, 0, 0, 0);
+    daysElapsed = Math.floor((today.getTime() - scheduled.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Clamp the elapsed days between 0 and 15
+    if (daysElapsed < 0) daysElapsed = 0;
+    if (daysElapsed > 15) daysElapsed = 15;
+  }
+  
+  return daysElapsed;
+}
+
 interface FormsModalProps {
   open: boolean;
   onClose: () => void;
@@ -454,8 +496,11 @@ function ViewConciliationModal({ open, onClose, conciliation, onSeePhotos, onRem
                               onClick={() => {
                                 // Convert file paths to proper URLs
                                 const documentationUrls = session.documentation.map((path: string) => {
-                                  const url = `http://localhost:5000/${path.replace(/\\/g, '/')}`;
-                                  return url;
+                                  const normalized = path.replace(/\\/g, '/');
+                                  // If backend already returned an absolute URL, use as-is; otherwise prepend server origin
+                                  return /^https?:\/\//i.test(normalized)
+                                    ? normalized
+                                    : `http://localhost:5000/${normalized}`;
                                 });
                                 onSeePhotos(documentationUrls);
                               }}
@@ -665,6 +710,12 @@ function StartConciliationModal({ open, onClose, conciliation, onSave, onResched
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (processType === "start") {
+      // Validate that the scheduled date and time has occurred
+      if (!isScheduledDateTimePassed()) {
+        setWarning("You cannot start the conciliation yet. The scheduled date and time has not occurred.");
+        return;
+      }
+      
       // Check if the current active session has already been completed
       const currentDate = conciliation.sessions[0]?.schedule_date;
       const currentTime = conciliation.sessions[0]?.schedule_time;
@@ -840,6 +891,34 @@ function StartConciliationModal({ open, onClose, conciliation, onSave, onResched
   const handleAddAgreement = () => setAgreements(prev => [...prev, ""]);
   const handleRemoveAgreement = (idx: number) => setAgreements(prev => prev.filter((_, i) => i !== idx));
   const handleAgreementChange = (idx: number, value: string) => setAgreements(prev => prev.map((a, i) => i === idx ? value : a));
+
+  // Always use sorted sessions for logic
+  const sortedSessions = getSortedSessions(conciliation?.sessions || []);
+
+  // Helper to check if scheduled date and time has passed
+  const isScheduledDateTimePassed = () => {
+    if (!conciliation || !sortedSessions.length) return false;
+    const lastSession = sortedSessions[sortedSessions.length - 1];
+    const scheduledDate = lastSession.schedule_date;
+    const scheduledTime = lastSession.schedule_time;
+    
+    if (!scheduledDate || !scheduledTime) return false;
+    
+    // Get current date and time
+    const now = new Date();
+    
+    // Parse scheduled date (format: YYYY-MM-DD)
+    const [year, month, day] = scheduledDate.split('-').map(Number);
+    
+    // Parse scheduled time (format: HH:mm or HH:mm:ss)
+    const [hours, minutes] = scheduledTime.split(':').map(Number);
+    
+    // Create scheduled datetime
+    const scheduledDateTime = new Date(year, month - 1, day, hours, minutes);
+    
+    // Return true if current time has passed the scheduled time
+    return now >= scheduledDateTime;
+  };
 
   if (!open || !conciliation) return null;
   return (
@@ -1851,7 +1930,8 @@ export default function ConciliationPage() {
         const casesMap = new Map();
         
         conciliationCases.forEach((c: any) => {
-          const daysElapsed = Math.floor((new Date().getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24));
+          // Calculate days elapsed from scheduled date using helper function (like mediation)
+          const daysElapsed = calculateTimeElapseFromSchedule([c]);
           const earliestCreatedAt = c.created_at;
           
           // Process reschedules to create sessions
@@ -2019,7 +2099,8 @@ export default function ConciliationPage() {
         const casesMap = new Map();
         
         conciliationCases.forEach((c: any) => {
-          const daysElapsed = Math.floor((new Date().getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24));
+          // Calculate days elapsed from scheduled date using helper function (like mediation)
+          const daysElapsed = calculateTimeElapseFromSchedule([c]);
           const earliestCreatedAt = c.created_at;
           
           // Process reschedules to create sessions
@@ -2122,7 +2203,8 @@ export default function ConciliationPage() {
           const casesMap = new Map();
           
           conciliationCases.forEach((c: any) => {
-            const daysElapsed = Math.floor((new Date().getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24));
+            // Calculate days elapsed from scheduled date using helper function (like mediation)
+          const daysElapsed = calculateTimeElapseFromSchedule([c]);
             const earliestCreatedAt = c.created_at;
             
             // Process reschedules to create sessions
@@ -2219,7 +2301,8 @@ export default function ConciliationPage() {
           const casesMap = new Map();
           
           conciliationCases.forEach((c: any) => {
-            const daysElapsed = Math.floor((new Date().getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24));
+            // Calculate days elapsed from scheduled date using helper function (like mediation)
+          const daysElapsed = calculateTimeElapseFromSchedule([c]);
             const earliestCreatedAt = c.created_at;
             
             // Process reschedules to create sessions
@@ -2254,7 +2337,7 @@ export default function ConciliationPage() {
               case_title: c.case_title || "",
               complainants: c.complainant ? c.complainant.split(", ") : [],
               respondents: c.respondent ? c.respondent.split(", ") : [],
-              time_elapse: `${daysElapsed}/15`,
+              time_elapse: c.time_elapse || "0/15",
               sessions: sessions,
               created_at: earliestCreatedAt,
               status: c.status || "",

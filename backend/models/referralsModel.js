@@ -10,8 +10,8 @@ async function createReferralsTableDb(connection) {
   return withConn(connection, async (conn) => {
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS referrals (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        original_complaint_id INT NOT NULL,
+        id SERIAL PRIMARY KEY,
+        original_complaint_id INTEGER NOT NULL,
         case_title VARCHAR(255) NOT NULL,
         case_description TEXT,
         nature_of_case VARCHAR(255),
@@ -19,12 +19,12 @@ async function createReferralsTableDb(connection) {
         incident_date DATE,
         incident_time TIME,
         incident_place VARCHAR(255),
-        complainant_id INT,
-        respondent_id INT,
-        witness_id INT,
+        complainant_id INTEGER,
+        respondent_id INTEGER,
+        witness_id INTEGER,
         referred_to VARCHAR(255) NOT NULL,
         referral_reason TEXT,
-        referred_by INT,
+        referred_by INTEGER,
         date_referred TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         status VARCHAR(50) DEFAULT 'referred',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -40,9 +40,7 @@ async function createReferralsTableDb(connection) {
       { name: 'date_referred', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' },
     ];
     for (const column of columnsToAdd) {
-      try { await conn.execute(`ALTER TABLE referrals ADD COLUMN ${column.name} ${column.type}`); } catch (e) {
-        if (e.code !== 'ER_DUP_FIELDNAME') {/* ignore */}
-      }
+      await conn.execute(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS ${column.name} ${column.type}`);
     }
     try {
       const [rows] = await conn.execute(`SELECT COUNT(*) as count FROM referrals WHERE date_referred IS NULL`);
@@ -50,7 +48,7 @@ async function createReferralsTableDb(connection) {
         await conn.execute(`UPDATE referrals SET date_referred = COALESCE(created_at, NOW()) WHERE date_referred IS NULL`);
       }
     } catch (e) {
-      if (e.code !== 'ER_BAD_FIELD_ERROR') {/* ignore */}
+      // ignore if columns not present (shouldn't happen with IF NOT EXISTS)
     }
     return true;
   });
@@ -67,14 +65,14 @@ async function transferComplaintDb(connection, { complaintId, referred_to, refer
     const [ins] = await conn.execute(
       `INSERT INTO referrals (original_complaint_id, case_title, case_description, nature_of_case, relief_sought,
         incident_date, incident_time, incident_place, complainant_id, respondent_id, witness_id, referred_to, referral_reason, referred_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       [c.id, c.case_title, c.case_description || null, c.nature_of_case || null, c.relief_description || null,
        c.incident_date || null, c.incident_time || null, c.incident_place || null, c.complainant_id || null,
        c.respondent_id || null, c.witness_id || null, referred_to, referral_reason || null, referred_by || null]
     );
     // Update complaint status if needed
     await conn.execute(`UPDATE complaints SET status = 'referred' WHERE id = ?`, [complaintId]);
-    return ins.insertId;
+    return ins[0]?.id || null;
   });
 }
 
@@ -179,8 +177,8 @@ async function updateReferralStatusDb(connection, referralId, status) {
 
 async function deleteReferralDb(connection, referralId) {
   return withConn(connection, async (conn) => {
-    const [res] = await conn.execute('DELETE FROM referrals WHERE id = ?', [referralId]);
-    return res.affectedRows > 0;
+    const [rows] = await conn.execute('DELETE FROM referrals WHERE id = $1 RETURNING id', [referralId]);
+    return rows.length > 0;
   });
 }
 

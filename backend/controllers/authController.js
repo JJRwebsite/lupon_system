@@ -10,37 +10,34 @@ const { sendVerificationCode, maskEmail } = require('../services/mailer');
 exports.testDb = async (req, res) => {
   try {
     const connection = await connectDB();
-    const [tables] = await connection.execute('SHOW TABLES LIKE "users"');
+    // Create users table if not exists (PostgreSQL)
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        last_name VARCHAR(255) NOT NULL,
+        first_name VARCHAR(255) NOT NULL,
+        middle_name VARCHAR(255),
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        birth_date DATE NOT NULL,
+        gender VARCHAR(50) NOT NULL,
+        purok TEXT NOT NULL DEFAULT '',
+        barangay VARCHAR(255) NOT NULL,
+        municipality VARCHAR(255) NOT NULL DEFAULT '',
+        contact VARCHAR(50),
+        role VARCHAR(50) NOT NULL DEFAULT 'user',
+        verification_code VARCHAR(10),
+        verification_expires TIMESTAMP,
+        is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
 
-    if (tables.length === 0) {
-      await connection.execute(`
-        CREATE TABLE IF NOT EXISTS users (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          last_name VARCHAR(255) NOT NULL,
-          first_name VARCHAR(255) NOT NULL,
-          middle_name VARCHAR(255),
-          email VARCHAR(255) NOT NULL UNIQUE,
-          password VARCHAR(255) NOT NULL,
-          birth_date DATE NOT NULL,
-          gender VARCHAR(50) NOT NULL,
-          purok TEXT NOT NULL,
-          barangay VARCHAR(255) NOT NULL,
-          municipality VARCHAR(255) NOT NULL,
-          contact VARCHAR(50),
-          role VARCHAR(50) NOT NULL DEFAULT 'user',
-          verification_code VARCHAR(10),
-          verification_expires DATETIME,
-          is_verified TINYINT(1) NOT NULL DEFAULT 0,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-      `);
-    }
-
-    // Ensure verification columns exist on existing deployments
+    // Ensure verification columns exist on existing deployments (types adjusted for PostgreSQL)
     await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(10)");
-    await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires DATETIME");
-    await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified TINYINT(1) NOT NULL DEFAULT 0");
+    await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP");
+    await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE");
     await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(50)");
 
     await connection.end();
@@ -69,7 +66,7 @@ exports.verifyEmail = async (req, res) => {
     }
 
     const u = rows[0];
-    if (Number(u.is_verified) === 1) {
+    if (u.is_verified === true) {
       await connection.end();
       return res.json({ success: true, message: 'Email already verified' });
     }
@@ -87,7 +84,7 @@ exports.verifyEmail = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid verification code' });
     }
 
-    await connection.execute('UPDATE users SET is_verified = 1, verification_code = NULL, verification_expires = NULL WHERE email = ?', [email]);
+    await connection.execute('UPDATE users SET is_verified = true, verification_code = NULL, verification_expires = NULL WHERE email = ?', [email]);
     await connection.end();
     res.json({ success: true, message: 'Email verified successfully' });
   } catch (error) {
@@ -109,7 +106,7 @@ exports.resendVerificationCode = async (req, res) => {
     const connection = await connectDB();
     // Generate new code and expiry
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const [expiryRow] = await connection.execute("SELECT NOW() + INTERVAL 10 MINUTE AS exp");
+    const [expiryRow] = await connection.execute("SELECT NOW() + INTERVAL '10 minutes' AS exp");
     const expiresAt = expiryRow[0].exp;
 
     const [rows] = await connection.execute('SELECT id FROM users WHERE email = ?', [email]);
@@ -247,31 +244,31 @@ INSERT INTO users (
 exports.registerUser = async (req, res) => {
   try {
     const {
-      lastName, firstName, middleName, email, password, birthDate, gender, purok, barangay, municipality, contact, role = 'user'
+      lastName, firstName, middleName, email, password, birthDate, gender, purok, barangay, municipality, contact, role = 'user', province
     } = req.body;
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const connection = await connectDB();
-    // Ensure verification columns exist (best-effort; ignore if not supported)
+    // Ensure verification columns exist (best-effort; ignore if not supported) - PostgreSQL syntax
     try { await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code VARCHAR(10)"); } catch(_) {}
-    try { await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires DATETIME"); } catch(_) {}
-    try { await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified TINYINT(1) NOT NULL DEFAULT 0"); } catch(_) {}
+    try { await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires TIMESTAMP"); } catch(_) {}
+    try { await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN NOT NULL DEFAULT FALSE"); } catch(_) {}
     // Ensure contact column exists to avoid insert failures when it's missing
     try { await connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS contact VARCHAR(50)"); } catch(_) {}
 
     // Check for existing email
     const [existing] = await connection.execute('SELECT id, is_verified FROM users WHERE email = ?', [email]);
-    // Generate 6-digit code and expiry (10 minutes)
+    // Generate 6-digit code and expiry (10 minutes) - PostgreSQL syntax
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const [expiryRow] = await connection.execute("SELECT NOW() + INTERVAL 10 MINUTE AS exp");
+    const [expiryRow] = await connection.execute("SELECT NOW() + INTERVAL '10 minutes' AS exp");
     const expiresAt = expiryRow[0].exp;
 
     if (existing.length > 0) {
       const userRow = existing[0];
       // If user exists but not verified, resend code and allow frontend to move to verification step
-      if (Number(userRow.is_verified) !== 1 && role === 'user') {
+      if (userRow.is_verified !== true && role === 'user') {
         await connection.execute('UPDATE users SET verification_code = ?, verification_expires = ? WHERE email = ?', [code, expiresAt, email]);
         await connection.end();
         try { await sendVerificationCode(email, code, 10); } catch (mailErr) { console.error('Email send error:', mailErr.message); }
@@ -284,14 +281,14 @@ exports.registerUser = async (req, res) => {
     // code and expiresAt already generated above
 
     const [result] = await connection.execute(
-      `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, contact, role, verification_code, verification_expires, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
-      [lastName, firstName, middleName, email, hashedPassword, birthDate, gender, purok, barangay, municipality, contact || '', role, code, expiresAt]
+      `INSERT INTO users (last_name, first_name, middle_name, email, password, birth_date, gender, purok, barangay, municipality, province, contact, role, verification_code, verification_expires, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, false)`,
+      [lastName, firstName, middleName, email, hashedPassword, birthDate, gender, purok, barangay, municipality, province || 'Cebu', contact || '', role, code, expiresAt]
     );
 
     // Option A: Auto-create or link a Resident record for this user
     try {
       // Ensure residents table has a user_id column for linkage (no-op if already exists)
-      try { await connection.execute("ALTER TABLE residents ADD COLUMN IF NOT EXISTS user_id INT"); } catch (_) {}
+      try { await connection.execute("ALTER TABLE residents ADD COLUMN IF NOT EXISTS user_id INTEGER"); } catch (_) {}
 
       const firstUpper = (firstName || '').toString().trim().toUpperCase();
       const lastUpper = (lastName || '').toString().trim().toUpperCase();
@@ -310,7 +307,7 @@ exports.registerUser = async (req, res) => {
         // Link resident to this user if not already linked
         // Link and backfill contact only if resident has no linked user yet.
         if (r.user_id == null) {
-          await connection.execute('UPDATE residents SET user_id = ?, contact = IFNULL(contact, ?) WHERE id = ?', [newUserId, contact || '', r.id]);
+          await connection.execute('UPDATE residents SET user_id = ?, contact = COALESCE(contact, ?) WHERE id = ?', [newUserId, contact || '', r.id]);
         }
       } else {
         // Create a new resident record linked to this user

@@ -19,13 +19,13 @@ async function getAdminStatsData(connection) {
       `SELECT COUNT(DISTINCT s.complaint_id) as count FROM settlement s INNER JOIN complaints c ON s.complaint_id = c.id`
     );
     const [[{ count: cfaCases }]] = await conn.execute(
-      `SELECT COUNT(*) as count FROM complaints WHERE status = 'cfa'`
+      `SELECT COUNT(*) as count FROM complaints WHERE status = 'Settled'`
     );
     const [[{ count: mediationCases }]] = await conn.execute(
       `SELECT COUNT(*) as count FROM complaints WHERE status = 'Mediation'`
     );
     const [[{ count: conciliationCases }]] = await conn.execute(
-      `SELECT COUNT(*) as count FROM complaints WHERE status LIKE '%conciliation%'`
+      `SELECT COUNT(*) as count FROM complaints WHERE status = 'Conciliation'`
     );
     const [[{ count: arbitrationCases }]] = await conn.execute(
       `SELECT COUNT(*) as count FROM complaints WHERE status = 'Arbitration'`
@@ -38,9 +38,11 @@ async function getAdminStatsData(connection) {
     );
 
     const [monthlyCasesRows] = await conn.execute(
-      `SELECT MONTH(created_at) as month, COUNT(*) as count
-       FROM complaints WHERE YEAR(created_at) = YEAR(CURDATE())
-       GROUP BY MONTH(created_at) ORDER BY MONTH(created_at)`
+      `SELECT EXTRACT(MONTH FROM created_at)::INT as month, COUNT(*) as count
+       FROM complaints
+       WHERE date_trunc('year', created_at) = date_trunc('year', CURRENT_DATE)
+       GROUP BY EXTRACT(MONTH FROM created_at)
+       ORDER BY month`
     );
 
     const [statusDistribution] = await conn.execute(
@@ -48,11 +50,11 @@ async function getAdminStatsData(connection) {
     );
 
     const [recentActivities] = await conn.execute(
-      `SELECT c.id, c.case_title, c.status, c.created_at,
+      `SELECT c.id, c.case_title as title, c.status, c.created_at as date,
               TRIM(CONCAT(UPPER(COALESCE(r1.lastname,'')), ', ', UPPER(COALESCE(r1.firstname,'')),
-                CASE WHEN COALESCE(r1.middlename,'') <> '' THEN CONCAT(' ', UPPER(r1.middlename)) ELSE '' END)) as complainant_name,
+                CASE WHEN COALESCE(r1.middlename,'') <> '' THEN CONCAT(' ', UPPER(r1.middlename)) ELSE '' END)) as complainant,
               TRIM(CONCAT(UPPER(COALESCE(r2.lastname,'')), ', ', UPPER(COALESCE(r2.firstname,'')),
-                CASE WHEN COALESCE(r2.middlename,'') <> '' THEN CONCAT(' ', UPPER(r2.middlename)) ELSE '' END)) as respondent_name
+                CASE WHEN COALESCE(r2.middlename,'') <> '' THEN CONCAT(' ', UPPER(r2.middlename)) ELSE '' END)) as respondent
        FROM complaints c
        LEFT JOIN residents r1 ON c.complainant_id = r1.id
        LEFT JOIN residents r2 ON c.respondent_id = r2.id
@@ -89,9 +91,9 @@ async function getAdminAnalyticsData(connection) {
     );
     const [[resolutionStats]] = await conn.execute(
       `SELECT 
-         AVG(DATEDIFF(updated_at, created_at)) as avg_resolution_days,
-         MIN(DATEDIFF(updated_at, created_at)) as min_resolution_days,
-         MAX(DATEDIFF(updated_at, created_at)) as max_resolution_days
+         AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400.0) as avg_resolution_days,
+         MIN(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400.0) as min_resolution_days,
+         MAX(EXTRACT(EPOCH FROM (updated_at - created_at)) / 86400.0) as max_resolution_days
        FROM complaints 
        WHERE status IN ('settled','resolved') AND updated_at IS NOT NULL`
     );

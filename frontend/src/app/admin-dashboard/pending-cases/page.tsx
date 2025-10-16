@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { EyeIcon, TrashIcon, CalendarDaysIcon, XMarkIcon, UserIcon, UsersIcon, IdentificationIcon, DocumentTextIcon, ExclamationTriangleIcon, CheckCircleIcon, ArrowRightIcon, CreditCardIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import ResidentSelector from "../../components/ResidentSelector";
@@ -631,66 +631,128 @@ function ReferralConfirmationModal({ open, onClose, onConfirm, caseData }: { ope
 
   if (!open || !caseData) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black opacity-50" aria-hidden="true" />
-      <div className="relative bg-white rounded-lg shadow-lg w-[500px] p-6 z-10">
-        <div className="flex justify-between items-center mb-4">
-          <span className="font-semibold text-lg">Refer Case to External Agency</span>
-          <button onClick={onClose}><XMarkIcon className="h-6 w-6" /></button>
-        </div>
-        <div className="mb-6">
-          <div className="mx-auto w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mb-3">
-            <ArrowRightIcon className="h-6 w-6 text-blue-600" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform transition-all">
+        {/* Header with gradient background */}
+        <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-8 py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                <ArrowRightIcon className="h-5 w-5 text-white" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Refer Case to External Agency</h2>
+            </div>
+            <button 
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+            >
+              <XMarkIcon className="h-5 w-5 text-white" />
+            </button>
           </div>
-          <h3 className="text-lg font-semibold mb-2 text-center">Refer Case #{caseData.id}?</h3>
-          <p className="text-gray-600 text-sm text-center mb-4">
-            This case will be removed from the Lupon system and transferred to the specified agency.
-          </p>
-          
-          <div className="space-y-4">
+        </div>
+
+        {/* Content */}
+        <div className="px-8 py-6">
+          {/* Case Information Card */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+            <div className="flex items-center space-x-3 mb-2">
+              <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                <DocumentTextIcon className="h-4 w-4 text-blue-600" />
+              </div>
+              <h3 className="font-semibold text-blue-900">Case #{caseData.id}</h3>
+            </div>
+            <p className="text-blue-800 font-medium mb-1">{caseData.case_title}</p>
+            <p className="text-blue-700 text-sm">
+              <span className="font-medium">Complainant:</span> {caseData.complainant?.display_name || 'N/A'}
+            </p>
+            <p className="text-blue-700 text-sm">
+              <span className="font-medium">Respondent:</span> {caseData.respondent?.display_name || 'N/A'}
+            </p>
+          </div>
+
+          {/* Warning Notice */}
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+            <div className="flex items-start space-x-3">
+              <ExclamationTriangleIcon className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <h4 className="font-medium text-amber-900 mb-1">Important Notice</h4>
+                <p className="text-amber-800 text-sm leading-relaxed">
+                  This case will be permanently removed from the Lupon system and transferred to the specified external agency. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Form Fields */}
+          <div className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Refer to (Agency/Department) *
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                <span className="flex items-center space-x-2">
+                  <CreditCardIcon className="h-4 w-4 text-blue-600" />
+                  <span>Refer to (Agency/Department)</span>
+                  <span className="text-red-500">*</span>
+                </span>
               </label>
               <input
                 type="text"
                 value={referredTo}
                 onChange={(e) => setReferredTo(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., Barangay Hall, Police Station, Court, etc."
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all text-gray-800 placeholder-gray-400"
+                placeholder="e.g., Barangay Hall, Police Station, Regional Trial Court, DILG Office"
               />
             </div>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Reason for Referral *
+              <label className="block text-sm font-semibold text-gray-800 mb-2">
+                <span className="flex items-center space-x-2">
+                  <DocumentTextIcon className="h-4 w-4 text-blue-600" />
+                  <span>Reason for Referral</span>
+                  <span className="text-red-500">*</span>
+                </span>
               </label>
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                rows={3}
-                placeholder="e.g., Case involves criminal matters, Outside Lupon jurisdiction, etc."
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all text-gray-800 placeholder-gray-400 resize-none"
+                rows={4}
+                placeholder="Please provide a detailed reason for referring this case (e.g., Criminal matters beyond Lupon jurisdiction, Requires specialized legal expertise, Complex property disputes, etc.)"
               />
             </div>
           </div>
         </div>
-        
-        <div className="flex justify-end gap-2">
-          <button 
-            className="px-4 py-2 rounded bg-gray-200 hover:bg-gray-300" 
-            onClick={onClose}
-            disabled={submitting}
-          >
-            Cancel
-          </button>
-          <button 
-            className="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" 
-            onClick={handleSubmit}
-            disabled={submitting}
-          >
-            {submitting ? 'Referring...' : 'Refer Case'}
-          </button>
+
+        {/* Footer Actions */}
+        <div className="bg-gray-50 px-8 py-4 border-t border-gray-200">
+          <div className="flex justify-end space-x-3">
+            <button 
+              className="px-6 py-2.5 rounded-xl border-2 border-gray-300 bg-white text-gray-700 font-medium hover:bg-gray-50 hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed" 
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
+            <button 
+              className="px-6 py-2.5 rounded-xl bg-blue-600 text-white font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl" 
+              onClick={handleSubmit}
+              disabled={submitting || !referredTo.trim() || !reason.trim()}
+            >
+              {submitting ? (
+                <span className="flex items-center space-x-2">
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Processing...</span>
+                </span>
+              ) : (
+                <span className="flex items-center space-x-2">
+                  <ArrowRightIcon className="h-4 w-4" />
+                  <span>Refer Case</span>
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>

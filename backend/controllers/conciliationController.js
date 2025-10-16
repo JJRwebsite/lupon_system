@@ -68,11 +68,72 @@ exports.rescheduleConciliation = async (req, res) => {
   }
 };
 
+// Helper function to calculate time elapsed from scheduled date
+function calculateTimeElapseFromSchedule(conciliationGroup) {
+  // Find the earliest scheduled date from all conciliation sessions
+  let earliestScheduledDate = null;
+  
+  console.log('🔍 DEBUG: Calculating time elapsed for conciliation group:', conciliationGroup.map(c => ({ id: c.id, date: c.date, reschedules: c.reschedules?.length || 0 })));
+  
+  conciliationGroup.forEach(con => {
+    // Check if this conciliation has reschedules with scheduled dates
+    if (con.reschedules && Array.isArray(con.reschedules)) {
+      con.reschedules.forEach(reschedule => {
+        if (reschedule.reschedule_date) {
+          if (!earliestScheduledDate || new Date(reschedule.reschedule_date) < new Date(earliestScheduledDate)) {
+            earliestScheduledDate = reschedule.reschedule_date;
+          }
+        }
+      });
+    }
+    
+    // Also check the main conciliation date as fallback
+    if (con.date) {
+      if (!earliestScheduledDate || new Date(con.date) < new Date(earliestScheduledDate)) {
+        earliestScheduledDate = con.date;
+      }
+    }
+  });
+  
+  console.log('🔍 DEBUG: Earliest scheduled date found:', earliestScheduledDate);
+  
+  // Calculate days elapsed from earliest scheduled date
+  let daysElapsed = 0;
+  if (earliestScheduledDate) {
+    const today = new Date();
+    const scheduled = new Date(earliestScheduledDate);
+    today.setHours(0, 0, 0, 0);
+    scheduled.setHours(0, 0, 0, 0);
+    daysElapsed = Math.floor((today.getTime() - scheduled.getTime()) / (1000 * 60 * 60 * 24));
+    
+    console.log('🔍 DEBUG: Raw days elapsed calculation:', daysElapsed);
+    
+    // Clamp the elapsed days between 0 and 15
+    if (daysElapsed < 0) daysElapsed = 0;
+    if (daysElapsed > 15) daysElapsed = 15;
+  }
+  
+  console.log('🔍 DEBUG: Final days elapsed after clamping:', daysElapsed);
+  
+  // Ensure we never return a negative value
+  return Math.max(0, daysElapsed);
+}
+
 // Get all conciliation schedules with joined complaint, complainant, and respondent info
 exports.getAllConciliations = async (req, res) => {
   const connection = await connectDB();
   try {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     const conciliations = await listAllConciliationsBasic(connection);
+    
+    // Group conciliations by complaint_id for time elapsed calculation
+    const conciliationsByComplaint = {};
+    conciliations.forEach(con => {
+      if (!conciliationsByComplaint[con.complaint_id]) {
+        conciliationsByComplaint[con.complaint_id] = [];
+      }
+      conciliationsByComplaint[con.complaint_id].push(con);
+    });
     
     // Fetch reschedules and their specific documentation for each conciliation session
     for (const conciliation of conciliations) {
@@ -93,7 +154,7 @@ exports.getAllConciliations = async (req, res) => {
                 `SELECT file_path FROM conciliation_documentation WHERE id IN (${placeholders})`,
                 docIds
               );
-              reschedule.documentation = docs.map(d => d.file_path);
+              reschedule.documentation = docs.map(d => `${baseUrl}/${d.file_path}`);
             }
           } catch (e) {
             console.error('Error parsing documentation_id for reschedule:', reschedule.id, e);
@@ -104,16 +165,23 @@ exports.getAllConciliations = async (req, res) => {
       
       conciliation.reschedules = reschedules;
       
+      // Calculate time elapsed for this conciliation's complaint group
+      const complaintGroup = conciliationsByComplaint[conciliation.complaint_id] || [conciliation];
+      const daysElapsed = calculateTimeElapseFromSchedule(complaintGroup);
+      conciliation.time_elapse = `${daysElapsed}/15`;
+      
       // Get the latest minutes from the most recent reschedule (if any)
       const latestReschedule = reschedules.length > 0 ? reschedules[reschedules.length - 1] : null;
-      conciliation.minutes = latestReschedule ? latestReschedule.minutes : null;
+      conciliation.minutes = (latestReschedule && latestReschedule.minutes)
+        ? latestReschedule.minutes
+        : (conciliation.minutes || null);
       
       // Keep case-level documentation for backward compatibility
       const [docs] = await connection.execute(
         'SELECT file_path FROM conciliation_documentation WHERE conciliation_id = ?',
         [conciliation.id]
       );
-      conciliation.documentation = docs.map(d => d.file_path);
+      conciliation.documentation = docs.map(d => `${baseUrl}/${d.file_path}`);
     }
     
     res.json(Array.isArray(conciliations) ? conciliations : []);
@@ -129,59 +197,10 @@ exports.saveConciliationSession = async (req, res) => {
   const files = req.files || [];
   const connection = await connectDB();
   try {
-    // Get current conciliation date and time
-    const [conciliation] = await connection.execute(
-      'SELECT date, time FROM conciliation WHERE id = ?',
-      [conciliation_id]
-    );
-    
-    if (conciliation.length === 0) {
-      return res.status(404).json({ success: false, error: 'Conciliation not found' });
-    }
-    
-    const { date, time } = conciliation[0];
-    
-    // Insert documentation files first and collect their IDs
-    const documentationIds = [];
-    for (const file of files) {
-      const [result] = await connection.execute(
-        'INSERT INTO conciliation_documentation (conciliation_id, file_path) VALUES (?, ?)',
-        [conciliation_id, file.path]
-      );
-      documentationIds.push(result.insertId);
-    }
-    
-    // Convert documentation IDs to JSON string for storage
-    // Use NULL for no files, or JSON array for files
-    const documentationIdsJson = documentationIds.length > 0 ? JSON.stringify(documentationIds) : null;
-    
-    console.log('Documentation processing:', {
-      filesCount: files.length,
-      documentationIds,
-      documentationIdsJson
-    });
-    
-    // Check if reschedule record exists for current date/time
-    const [existingReschedule] = await connection.execute(
-      'SELECT id FROM conciliation_reschedule WHERE conciliation_id = ? AND reschedule_date = ? AND reschedule_time = ?',
-      [conciliation_id, date, time]
-    );
-    
-    if (existingReschedule.length > 0) {
-      // Update existing reschedule record with minutes and documentation IDs
-      await connection.execute(
-        'UPDATE conciliation_reschedule SET minutes = ?, documentation_id = ? WHERE id = ?',
-        [minutes, documentationIdsJson, existingReschedule[0].id]
-      );
-    } else {
-      // Create new reschedule record for current session with documentation IDs
-      await connection.execute(
-        'INSERT INTO conciliation_reschedule (conciliation_id, reschedule_date, reschedule_time, minutes, reason, documentation_id) VALUES (?, ?, ?, ?, ?, ?)',
-        [conciliation_id, date, time, minutes, 'Initial session', documentationIdsJson]
-      );
-    }
+    await saveConciliationSessionDb(connection, { conciliation_id, minutes, files });
     res.json({ success: true });
   } catch (error) {
+    console.error('Error in saveConciliationSession:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
     await connection.end();
@@ -233,13 +252,11 @@ exports.rescheduleConciliation = async (req, res) => {
   }
 };
 
-// Get available slots for a specific date
 exports.getAvailableSlots = async (req, res) => {
   const { date } = req.params;
-  const { excludeConciliationId } = req.query;
   const connection = await connectDB();
   try {
-    const { availableSlotsLen, usedSlots, actualUsedSlots, maxSlotsPerDay, bookedTimes, isFull } = await getAvailableSlotsDetails(connection, date, excludeConciliationId || null);
+    const { availableTimes, bookedTimes, usedSlots, maxSlotsPerDay, isFull } = await getAvailableSlotsDetails(connection, date);
     const formatTime = (time24) => {
       const [hours, minutes] = time24.split(':');
       const hour12 = parseInt(hours) > 12 ? parseInt(hours) - 12 : parseInt(hours);
@@ -251,15 +268,13 @@ exports.getAvailableSlots = async (req, res) => {
     res.json({
       success: true,
       data: {
-        availableSlots: availableSlotsLen,
+        availableSlots: availableTimes.length,
         usedSlots,
-        actualUsedSlots,
         maxSlotsPerDay,
         scheduledTimes,
         bookedTimes,
         isFull,
-        isReschedule: !!excludeConciliationId,
-      }
+      },
     });
   } catch (error) {
     console.error('Error in getAvailableSlots:', error);

@@ -27,58 +27,29 @@ exports.setArbitrationSchedule = async (req, res) => {
   }
 };
 
-// Get all arbitration schedules with joined complaint, complainant, and respondent info
+// Get all arbitration schedules with joined complaint, complainant, and respondent info (like mediation/conciliation)
 exports.getAllArbitrations = async (req, res) => {
   const connection = await connectDB();
   try {
+    console.log('🔍 getAllArbitrations - Starting to fetch arbitrations');
     const arbitrations = await listAllArbitrationsDetailed(connection);
+    console.log('🔍 getAllArbitrations - Found arbitrations:', arbitrations.length);
     
-    // Fetch reschedules and their specific documentation for each arbitration session
-    for (const arbitration of arbitrations) {
-      const [reschedules] = await connection.execute(
-        'SELECT * FROM arbitration_reschedule WHERE arbitration_id = ? ORDER BY created_at ASC',
-        [arbitration.id]
-      );
-      
-      // For each reschedule, fetch its specific documentation
-      for (const reschedule of reschedules) {
-        reschedule.documentation = [];
-        if (reschedule.documentation_id) {
-          try {
-            const docIds = JSON.parse(reschedule.documentation_id);
-            if (Array.isArray(docIds) && docIds.length > 0) {
-              const placeholders = docIds.map(() => '?').join(',');
-              const [docs] = await connection.execute(
-                `SELECT file_path FROM arbitration_documentation WHERE id IN (${placeholders})`,
-                docIds
-              );
-              reschedule.documentation = docs.map(d => d.file_path);
-            }
-          } catch (e) {
-            console.error('Error parsing documentation_id for reschedule:', reschedule.id, e);
-            reschedule.documentation = [];
-          }
-        }
-      }
-      
-      arbitration.reschedules = reschedules;
-      
-      // Get the latest minutes from the most recent reschedule (if any)
-      const latestReschedule = reschedules.length > 0 ? reschedules[reschedules.length - 1] : null;
-      arbitration.minutes = latestReschedule ? latestReschedule.minutes : null;
-      
-      // Keep case-level documentation for backward compatibility
-      const [docs] = await connection.execute(
-        'SELECT file_path FROM arbitration_documentation WHERE arbitration_id = ?',
-        [arbitration.id]
-      );
-      arbitration.documentation = docs.map(d => d.file_path);
+    // Ensure arbitrations is an array
+    if (!Array.isArray(arbitrations)) {
+      console.error('❌ getAllArbitrations - Expected array, got:', typeof arbitrations);
+      return res.json([]);
     }
-    res.json(Array.isArray(arbitrations) ? arbitrations : []); // Always return an array
+    
+    console.log('✅ getAllArbitrations - Successfully processed arbitrations');
+    res.json(arbitrations);
   } catch (error) {
+    console.error('❌ getAllArbitrations - Fatal error:', error);
     res.status(500).json({ success: false, error: error.message });
   } finally {
-    await connection.end();
+    if (connection) {
+      await connection.end();
+    }
   }
 };
 

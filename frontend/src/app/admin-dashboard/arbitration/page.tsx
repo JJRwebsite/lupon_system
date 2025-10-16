@@ -528,6 +528,12 @@ function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedul
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (processType === "start") {
+      // Validate that the scheduled date and time has occurred
+      if (!isScheduledDateTimePassed()) {
+        setWarning("You cannot start the arbitration yet. The scheduled date and time has not occurred.");
+        return;
+      }
+      
       const lastSession = arbitration.sessions[arbitration.sessions.length - 1];
       if (lastSession.arbitration_minutes || (lastSession.documentation && lastSession.documentation.length > 0)) {
         setWarning("You must reschedule before starting a new arbitration session.");
@@ -603,6 +609,31 @@ function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedul
   const handleAddAgreement = () => setAgreements(prev => [...prev, ""]);
   const handleRemoveAgreement = (idx: number) => setAgreements(prev => prev.filter((_, i) => i !== idx));
   const handleAgreementChange = (idx: number, value: string) => setAgreements(prev => prev.map((a, i) => i === idx ? value : a));
+
+  // Helper to check if scheduled date and time has passed
+  const isScheduledDateTimePassed = () => {
+    if (!arbitration || !arbitration.sessions.length) return false;
+    const lastSession = arbitration.sessions[arbitration.sessions.length - 1];
+    const scheduledDate = lastSession.schedule_date;
+    const scheduledTime = lastSession.schedule_time;
+    
+    if (!scheduledDate || !scheduledTime) return false;
+    
+    // Get current date and time
+    const now = new Date();
+    
+    // Parse scheduled date (format: YYYY-MM-DD)
+    const [year, month, day] = scheduledDate.split('-').map(Number);
+    
+    // Parse scheduled time (format: HH:mm or HH:mm:ss)
+    const [hours, minutes] = scheduledTime.split(':').map(Number);
+    
+    // Create scheduled datetime
+    const scheduledDateTime = new Date(year, month - 1, day, hours, minutes);
+    
+    // Return true if current time has passed the scheduled time
+    return now >= scheduledDateTime;
+  };
 
   if (!open || !arbitration) return null;
   return (
@@ -1097,13 +1128,14 @@ export default function ArbitrationPage() {
       
       // Transform data to match frontend interface
       const transformedData = data.map((arb: any) => {
-        // Create sessions array from reschedules
+        // Create sessions array from reschedules (like mediation/conciliation)
         const rescheduleSessions = arb.reschedules?.map((reschedule: any) => ({
           id: reschedule.id,
           schedule_date: reschedule.reschedule_date,
           schedule_time: reschedule.reschedule_time,
           arbitration_minutes: reschedule.minutes || '',
-          documentation: Array.isArray(reschedule.documentation) ? reschedule.documentation : (reschedule.documentation ? JSON.parse(reschedule.documentation) : []),
+          // Process documentation array properly from backend
+          documentation: Array.isArray(reschedule.documentation) ? reschedule.documentation : [],
           reason: reschedule.reason || ''
         })) || [];
         

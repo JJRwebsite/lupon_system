@@ -21,7 +21,7 @@ async function getUserStatsData(connection, userId) {
       [userId, userId, userId]
     );
     const [[{ count: mediationSchedules }]] = await conn.execute(
-      `SELECT COUNT(*) as count FROM mediation m JOIN complaints c ON m.complaint_id = c.id WHERE m.date >= CURDATE() AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)`,
+      `SELECT COUNT(*) as count FROM mediation m JOIN complaints c ON m.complaint_id = c.id WHERE m.date >= CURRENT_DATE AND (c.complainant_id = ? OR c.respondent_id = ? OR c.user_id = ?)`,
       [userId, userId, userId]
     );
     const [[{ count: totalMediation }]] = await conn.execute(
@@ -29,7 +29,12 @@ async function getUserStatsData(connection, userId) {
       [userId, userId, userId]
     );
     const [yearlyData] = await conn.execute(
-      `SELECT MONTH(date_filed) as month, COUNT(*) as count FROM complaints WHERE YEAR(date_filed) = YEAR(CURDATE()) AND (complainant_id = ? OR respondent_id = ? OR user_id = ?) GROUP BY MONTH(date_filed) ORDER BY month`,
+      `SELECT EXTRACT(MONTH FROM date_filed)::INT as month, COUNT(*) as count
+       FROM complaints
+       WHERE date_trunc('year', date_filed) = date_trunc('year', CURRENT_DATE)
+         AND (complainant_id = ? OR respondent_id = ? OR user_id = ?)
+       GROUP BY EXTRACT(MONTH FROM date_filed)
+       ORDER BY month`,
       [userId, userId, userId]
     );
     const [statusDistribution] = await conn.execute(

@@ -1,7 +1,19 @@
 const connectDB = require('../config/db');
 
 async function ensureSettlementTable(connection) {
-  await connection.execute('CREATE TABLE IF NOT EXISTS settlement (\n    id INT PRIMARY KEY AUTO_INCREMENT,\n    complaint_id INT NOT NULL,\n    settlement_type ENUM(\'mediation\', \'conciliation\', \'arbitration\') NOT NULL,\n    settlement_date DATE NOT NULL,\n    agreements TEXT NOT NULL,\n    remarks TEXT,\n    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n    FOREIGN KEY (complaint_id) REFERENCES complaints(id) ON DELETE CASCADE\n  )');
+  await connection.execute(`
+    CREATE TABLE IF NOT EXISTS settlement (
+      id SERIAL PRIMARY KEY,
+      complaint_id INTEGER NOT NULL,
+      settlement_type TEXT NOT NULL CHECK (settlement_type IN ('mediation','conciliation','arbitration')),
+      settlement_date DATE NOT NULL,
+      agreements TEXT NOT NULL,
+      remarks TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      CONSTRAINT fk_settlement_complaint FOREIGN KEY (complaint_id) REFERENCES complaints(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 // Return list of settlements with joined complaint info and computed party names (arrays)

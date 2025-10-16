@@ -10,7 +10,7 @@ function timeToMinutes(timeStr) {
 // Returns all booked times across mediation, conciliation, arbitration for a given date
 async function getBookedTimesForDate(connection, date) {
   const [mediationSchedules] = await connection.execute(
-    'SELECT time FROM mediation WHERE date = ? AND is_deleted = 0',
+    'SELECT time FROM mediation WHERE date = ? AND is_deleted = FALSE',
     [date]
   );
   const [conciliationSchedules] = await connection.execute(
@@ -18,7 +18,7 @@ async function getBookedTimesForDate(connection, date) {
     [date]
   );
   const [arbitrationSchedules] = await connection.execute(
-    'SELECT time FROM arbitration WHERE date = ? AND is_deleted = 0',
+    'SELECT time FROM arbitration WHERE date = ? AND is_deleted = FALSE',
     [date]
   );
 
@@ -47,7 +47,7 @@ async function getAvailableSlotsDetails(connection, date) {
 async function setMediationScheduleDb(connection, { complaint_id, date, time }) {
   // Fetch schedules for the day
   const [existingSchedules] = await connection.execute(
-    'SELECT id, complaint_id, time FROM mediation WHERE date = ? AND is_deleted = 0',
+    'SELECT id, complaint_id, time FROM mediation WHERE date = ? AND is_deleted = FALSE',
     [date]
   );
 
@@ -71,12 +71,12 @@ async function setMediationScheduleDb(connection, { complaint_id, date, time }) 
 
   // Upsert mediation row
   const [existing] = await connection.execute(
-    'SELECT id FROM mediation WHERE complaint_id = ? AND is_deleted = 0',
+    'SELECT id FROM mediation WHERE complaint_id = ? AND is_deleted = FALSE',
     [complaint_id]
   );
   if (existing.length > 0) {
     await connection.execute(
-      'UPDATE mediation SET date = ?, time = ? WHERE complaint_id = ? AND is_deleted = 0',
+      'UPDATE mediation SET date = ?, time = ? WHERE complaint_id = ? AND is_deleted = FALSE',
       [date, time, complaint_id]
     );
   } else {
@@ -88,7 +88,7 @@ async function setMediationScheduleDb(connection, { complaint_id, date, time }) 
 
   // Clear conciliation (same complaint) and soft-delete arbitration to free slot
   await connection.execute('DELETE FROM conciliation WHERE complaint_id = ?', [complaint_id]);
-  await connection.execute('UPDATE arbitration SET is_deleted = 1 WHERE complaint_id = ? AND is_deleted = 0', [complaint_id]);
+  await connection.execute('UPDATE arbitration SET is_deleted = TRUE WHERE complaint_id = ? AND is_deleted = FALSE', [complaint_id]);
 
   // Update complaint status
   await connection.execute('UPDATE complaints SET status = ? WHERE id = ?', ['Mediation', complaint_id]);
@@ -99,7 +99,7 @@ async function setMediationScheduleDb(connection, { complaint_id, date, time }) 
 // Return mediations with joined complaint and party display names
 async function listAllMediationsDetailed(connection) {
   const [mediations] = await connection.execute(`
-    SELECT m.id, m.complaint_id, DATE_FORMAT(m.date, '%Y-%m-%d') as date, m.time, m.created_at,
+    SELECT m.id, m.complaint_id, to_char(m.date, 'YYYY-MM-DD') as date, m.time, m.created_at,
            c.case_title, c.status,
            TRIM(CONCAT(UPPER(COALESCE(comp.lastname,'')), ', ', UPPER(COALESCE(comp.firstname,'')),
              CASE WHEN COALESCE(comp.middlename,'') <> '' THEN CONCAT(' ', UPPER(comp.middlename)) ELSE '' END)) AS complainant,
@@ -109,29 +109,74 @@ async function listAllMediationsDetailed(connection) {
     LEFT JOIN complaints c ON m.complaint_id = c.id
     LEFT JOIN residents comp ON c.complainant_id = comp.id
     LEFT JOIN residents resp ON c.respondent_id = resp.id
-    WHERE m.is_deleted = 0
+    WHERE m.is_deleted = FALSE
     ORDER BY m.date DESC, m.time ASC
   `);
   return mediations;
 }
 
-// Save mediation minutes and optional documentation
+// Save mediation session with reschedule-based architecture
 async function saveMediationSessionDb(connection, { mediation_id, minutes, files = [] }) {
-  if (minutes && minutes.trim()) {
-    await connection.execute('UPDATE mediation SET minutes = ? WHERE id = ?', [minutes, mediation_id]);
+  // Get current mediation date and time
+  const [mediation] = await connection.execute(
+    'SELECT date, time FROM mediation WHERE id = ?',
+    [mediation_id]
+  );
+  
+  if (mediation.length === 0) {
+    throw new Error('Mediation not found');
   }
-  for (const filePath of files) {
+  
+  const { date, time } = mediation[0];
+  
+  // Insert documentation files first and collect their IDs
+  const documentationIds = [];
+  for (const file of files) {
+    if (file && file.filename) {
+      const cleanPath = `uploads/mediation/${file.filename}`;
+      
+      const [rows] = await connection.execute(
+        'INSERT INTO mediation_documentation (mediation_id, file_path) VALUES (?, ?) RETURNING id',
+        [mediation_id, cleanPath]
+      );
+      
+      const newId = Array.isArray(rows) && rows.length > 0 ? rows[0].id : null;
+      if (newId) {
+        documentationIds.push(newId);
+      }
+    }
+  }
+  
+  // Convert documentation IDs to JSON string for storage
+  const cleanedDocumentationIds = documentationIds.filter(id => id !== null && id !== undefined);
+  const documentationIdsJson = JSON.stringify(cleanedDocumentationIds);
+  
+  // Check if reschedule record exists for current date/time
+  const [existingReschedule] = await connection.execute(
+    'SELECT id FROM mediation_reschedule WHERE mediation_id = ? AND reschedule_date = ? AND reschedule_time = ?',
+    [mediation_id, date, time]
+  );
+  
+  if (existingReschedule.length > 0) {
+    // Update existing reschedule record with minutes and documentation IDs
     await connection.execute(
-      'INSERT INTO mediation_documentation (mediation_id, file_path) VALUES (?, ?)',
-      [mediation_id, filePath]
+      'UPDATE mediation_reschedule SET minutes = ?, documentation_id = ? WHERE id = ?',
+      [minutes, documentationIdsJson, existingReschedule[0].id]
     );
+    return existingReschedule[0].id;
+  } else {
+    // Create new reschedule record for current session with documentation IDs
+    const [result] = await connection.execute(
+      'INSERT INTO mediation_reschedule (mediation_id, reschedule_date, reschedule_time, minutes, reason, documentation_id) VALUES (?, ?, ?, ?, ?, ?) RETURNING id',
+      [mediation_id, date, time, minutes, 'Initial session', documentationIdsJson]
+    );
+    return result[0].id;
   }
-  return true;
 }
 
 // Soft-delete a mediation (mark is_deleted = 1)
 async function softDeleteMediationDb(connection, mediation_id) {
-  await connection.execute('UPDATE mediation SET is_deleted = 1 WHERE id = ?', [mediation_id]);
+  await connection.execute('UPDATE mediation SET is_deleted = TRUE WHERE id = ?', [mediation_id]);
   return true;
 }
 

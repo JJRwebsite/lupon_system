@@ -19,19 +19,25 @@ const {
 exports.addStatusColumn = async () => {
   const connection = await connectDB();
   try {
-    // Check if status column exists
+    // Ensure complaints table exists (PostgreSQL)
+    const [tbl] = await connection.execute("SELECT to_regclass('public.complaints') AS exists");
+    if (!tbl || !tbl[0] || !tbl[0].exists) {
+      console.log("Complaints table does not exist; skipping addStatusColumn.");
+      return;
+    }
+
+    // Check if status column exists (information_schema on Postgres)
     const [columns] = await connection.execute(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'complaints' 
-      AND COLUMN_NAME = 'status'
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'complaints' AND column_name = 'status'
     `);
 
     if (columns.length === 0) {
       // Add status column if it doesn't exist
       await connection.execute(`
         ALTER TABLE complaints 
-        ADD COLUMN status VARCHAR(50) DEFAULT 'pending'
+        ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'pending'
       `);
     }
   } catch (error) {

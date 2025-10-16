@@ -344,7 +344,11 @@ function ViewMediationModal({ open, onClose, mediation, onSeePhotos, onRemoveSes
                                   onClick={() => {
                                     // Convert file paths to proper URLs
                                     const documentationUrls = reschedule.documentation.map((path: string) => {
-                                      const url = `http://localhost:5000/${path.replace(/\\/g, '/')}`;
+                                      const normalized = path.replace(/\\/g, '/');
+                                      // If backend already returned an absolute URL, use as-is; otherwise prepend server origin
+                                      const url = /^https?:\/\//i.test(normalized)
+                                        ? normalized
+                                        : `http://localhost:5000/${normalized}`;
                                       console.log('Converting path to URL:', path, '->', url);
                                       return url;
                                     });
@@ -542,26 +546,37 @@ function StartMediationModal({ open, onClose, mediation, onSave, onReschedule, s
   // Always use sorted sessions for logic
   const sortedSessions = getSortedSessions(mediation?.sessions || []);
 
-  // Helper to check if scheduled date has passed (ignore time, string comparison)
-  const isScheduledDatePassed = () => {
+  // Helper to check if scheduled date and time has passed
+  const isScheduledDateTimePassed = () => {
     if (!mediation || !sortedSessions.length) return false;
     const lastSession = sortedSessions[sortedSessions.length - 1];
     const scheduledDate = lastSession.schedule_date;
-    if (!scheduledDate) return false;
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-    const todayStr = `${yyyy}-${mm}-${dd}`;
-    return todayStr >= scheduledDate;
+    const scheduledTime = lastSession.schedule_time;
+    
+    if (!scheduledDate || !scheduledTime) return false;
+    
+    // Get current date and time
+    const now = new Date();
+    
+    // Parse scheduled date (format: YYYY-MM-DD)
+    const [year, month, day] = scheduledDate.split('-').map(Number);
+    
+    // Parse scheduled time (format: HH:mm or HH:mm:ss)
+    const [hours, minutes] = scheduledTime.split(':').map(Number);
+    
+    // Create scheduled datetime
+    const scheduledDateTime = new Date(year, month - 1, day, hours, minutes);
+    
+    // Return true if current time has passed the scheduled time
+    return now >= scheduledDateTime;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (processType === "start") {
-      // Validation: scheduled date must have passed (ignore time)
-      if (!isScheduledDatePassed()) {
-        setWarning("You can't save. The mediation date has not yet occurred.");
+      // Validate that the scheduled date and time has occurred
+      if (!isScheduledDateTimePassed()) {
+        setWarning("You cannot start the mediation yet. The scheduled date and time has not occurred.");
         return;
       }
       
