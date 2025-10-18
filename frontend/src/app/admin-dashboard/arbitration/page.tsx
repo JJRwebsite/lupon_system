@@ -421,7 +421,6 @@ function StartArbitrationModal({
   
   const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
 
   useEffect(() => {
@@ -495,7 +494,6 @@ function StartArbitrationModal({
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
     const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
     const startDate = new Date(firstDay);
     startDate.setDate(startDate.getDate() - firstDay.getDay());
     
@@ -766,7 +764,16 @@ function StartArbitrationModal({
                     <div className="flex flex-wrap gap-2 mt-2">
                       {previews.map((src, idx) => (
                         <div key={idx} className="relative inline-block">
-                          <img src={src} alt={`doc-${idx}`} className="h-20 w-20 object-cover rounded border" />
+                          <div className="relative h-20 w-20">
+                            <Image 
+                              src={src} 
+                              alt={`doc-${idx}`} 
+                              fill
+                              className="object-cover rounded border"
+                              sizes="5rem"
+                              priority={false}
+                            />
+                          </div>
                           <button type="button" onClick={() => handleRemoveImage(idx)} className="absolute -top-2 -right-2 bg-white border border-gray-400 rounded-full p-1 shadow hover:bg-red-500 hover:text-white transition-colors">
                             <XMarkIcon className="h-4 w-4" />
                           </button>
@@ -1093,7 +1100,7 @@ function SettlementModal({
       setAgreements("");
       setRemarks("");
     }
-  }, [open]);
+  }, [open, setAgreements, setRemarks]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1200,10 +1207,37 @@ export default function ArbitrationPage() {
       }
       const data = await response.json();
       
+      // Define types for API response
+      interface RescheduleApiResponse {
+        id: number;
+        reschedule_date: string;
+        reschedule_time: string;
+        minutes: string;
+        documentation: string[] | string; // Can be either array or string (JSON string)
+        reason?: string;
+      }
+
+      interface ArbitrationApiResponse {
+        id: number;
+        complaint_id: number;
+        case_title: string;
+        date: string;
+        time: string;
+        minutes: string;
+        documentation: string[] | string;
+        reschedules?: RescheduleApiResponse[];
+        panel_members?: string | Array<{id: string | number; name: string}>;
+        time_elapse?: string;
+        created_at: string;
+        complainant?: string;
+        respondent?: string;
+        [key: string]: unknown;
+      }
+
       // Transform data to match frontend interface
-      const transformedData = data.map((arb: any) => {
+      const transformedData = data.map((arb: ArbitrationApiResponse) => {
         // Create sessions array from reschedules (like mediation/conciliation)
-        const rescheduleSessions = arb.reschedules?.map((reschedule: any) => ({
+        const rescheduleSessions = arb.reschedules?.map((reschedule: RescheduleApiResponse) => ({
           id: reschedule.id,
           schedule_date: reschedule.reschedule_date,
           schedule_time: reschedule.reschedule_time,
@@ -1221,18 +1255,26 @@ export default function ArbitrationPage() {
           documentation: Array.isArray(arb.documentation) ? arb.documentation : (arb.documentation ? JSON.parse(arb.documentation) : [])
         }];
         
+        // Define panel member type
+        interface PanelMember {
+          id?: string | number;
+          name?: string;
+          [key: string]: unknown;
+        }
+
         // Process panel_members - handle both string (JSON) and array formats
         let panelMembers: Array<{id: string | number; name: string}> = [];
         if (arb.panel_members) {
           try {
             // If panel_members is a string, parse it as JSON
-            const parsedMembers = typeof arb.panel_members === 'string' 
+            const parsedMembers: PanelMember | PanelMember[] = typeof arb.panel_members === 'string' 
               ? JSON.parse(arb.panel_members)
               : arb.panel_members;
               
             // Ensure we have an array of objects with id and name
-            if (Array.isArray(parsedMembers)) {
-              panelMembers = parsedMembers.map((member: any, i: number) => ({
+            const membersArray = Array.isArray(parsedMembers) ? parsedMembers : [parsedMembers];
+            if (membersArray.length > 0) {
+              panelMembers = membersArray.map((member: PanelMember, i: number) => ({
                 id: member?.id || i,
                 name: typeof member === 'string' ? member : (member?.name || `Panel Member ${i + 1}`)
               }));
@@ -1331,7 +1373,7 @@ export default function ArbitrationPage() {
       formData.append('minutes', minutes);
       
       // Add images to form data
-      images.forEach((image, index) => {
+      images.forEach((image) => {
         formData.append('documentation', image);
       });
       
