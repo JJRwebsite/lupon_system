@@ -1,6 +1,16 @@
 "use client";
 import { useState, useEffect, ChangeEvent } from "react";
+import Image from 'next/image';
 import { EyeIcon, UsersIcon, ScaleIcon, PlayCircleIcon, XMarkIcon, DocumentTextIcon, IdentificationIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
+
+interface ArbitrationReschedule {
+  id: number;
+  reschedule_date: string;
+  reschedule_time: string;
+  minutes: string;
+  documentation: string[];
+  reason?: string;
+}
 
 interface ArbitrationSession {
   id: number;
@@ -8,8 +18,9 @@ interface ArbitrationSession {
   schedule_time: string;
   arbitration_minutes: string;
   documentation: string[];
-  reschedules?: any[];
+  reschedules?: ArbitrationReschedule[];
   reason?: string;
+  panel?: string[]; // Array of panel member IDs or names
 }
 
 interface ArbitrationCase {
@@ -20,6 +31,7 @@ interface ArbitrationCase {
   respondents: string[];
   time_elapse: string;
   sessions: ArbitrationSession[];
+  panel_members?: Array<{ id: string | number; name: string }>; // Array of panel members with id and name
 }
 
 interface FormsModalProps {
@@ -35,7 +47,7 @@ const FormsModal = ({ open, onClose, arbitration, handleDownloadPDF }: FormsModa
   return (
     <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.2)", zIndex: 1000 }}>
       <div style={{ background: "#fff", margin: "40px auto", padding: 24, borderRadius: 8, maxWidth: 900, minHeight: 500, position: "relative" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid #f59e0b", marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "2px solid blue", marginBottom: 24 }}>
           <span style={{ fontSize: 22, fontWeight: 500 }}>Arbitration Forms</span>
           <button onClick={onClose} style={{ fontSize: 28, background: "none", border: "none", cursor: "pointer" }}>&times;</button>
         </div>
@@ -50,7 +62,7 @@ const FormsModal = ({ open, onClose, arbitration, handleDownloadPDF }: FormsModa
                 </div>
                 <div style={{ marginBottom: 4, fontWeight: 500 }}>{form.title}</div>
                 <div style={{ marginBottom: 8, fontSize: 12, color: "#666" }}>{form.description}</div>
-                <button onClick={() => handleDownloadPDF(form.type, arbitration)} style={{ width: "100%", background: "#f59e0b", color: "#fff", border: "none", padding: 8, borderRadius: 4, fontWeight: 500, cursor: "pointer" }}>Download</button>
+                <button onClick={() => handleDownloadPDF(form.type, arbitration)} style={{ width: "100%", background: "blue", color: "#fff", border: "none", padding: 8, borderRadius: 4, fontWeight: 500, cursor: "pointer" }}>Download</button>
               </div>
             );
           })}
@@ -74,7 +86,15 @@ function SeePhotosModal({ open, onClose, images }: { open: boolean, onClose: () 
         </div>
         <div className="bg-gray-100 border border-gray-300 rounded-lg p-6 flex flex-wrap gap-4 justify-center">
           {images.map((src, idx) => (
-            <img key={idx} src={src} alt={`doc-${idx}`} className="h-48 w-48 object-cover rounded border" />
+            <div key={idx} className="relative h-48 w-48">
+              <Image
+                src={src}
+                alt={`Document ${idx + 1}`}
+                fill
+                className="object-cover rounded border"
+                sizes="(max-width: 192px) 100vw, 192px"
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -82,7 +102,19 @@ function SeePhotosModal({ open, onClose, images }: { open: boolean, onClose: () 
   );
 }
 
-function ViewArbitrationModal({ open, onClose, arbitration, onSeePhotos, onRemoveSession }: { open: boolean, onClose: () => void, arbitration: any, onSeePhotos: (images: string[]) => void, onRemoveSession: (idx: number) => void }) {
+function ViewArbitrationModal({ 
+  open, 
+  onClose, 
+  arbitration, 
+  onSeePhotos, 
+  onRemoveSession 
+}: { 
+  open: boolean; 
+  onClose: () => void; 
+  arbitration: ArbitrationCase | null; 
+  onSeePhotos: (images: string[]) => void; 
+  onRemoveSession: (idx: number) => void; 
+}) {
   if (!open || !arbitration) return null;
   
   // Debug logging to see what data we're receiving
@@ -114,8 +146,8 @@ function ViewArbitrationModal({ open, onClose, arbitration, onSeePhotos, onRemov
     }
     const d = new Date(`1970-01-01T${timeStr}`);
     if (!isNaN(d.getTime())) {
-      let h = d.getHours();
-      let m = d.getMinutes();
+      const h = d.getHours();
+      const m = d.getMinutes();
       const ampm = h >= 12 ? "PM" : "AM";
       const hour = h % 12 === 0 ? 12 : h % 12;
       return `${hour.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}` + ` ${ampm}`;
@@ -196,18 +228,31 @@ function ViewArbitrationModal({ open, onClose, arbitration, onSeePhotos, onRemov
               <div className="flex items-center gap-2 mb-4 text-blue-700 font-semibold">
                 <UsersIcon className="h-5 w-5" /> Selected Lupon Panel
               </div>
+              
               {(() => {
                 // Check for panel data from multiple sources
-                let panelMembers = [];
+                let panelMembers: string[] = [];
                 
                 // First check if panel data exists in sessions
-                if (arbitration.sessions && arbitration.sessions.length > 0 && arbitration.sessions[0].panel && arbitration.sessions[0].panel.length > 0) {
+                if (arbitration.sessions && arbitration.sessions.length > 0 && 
+                    arbitration.sessions[0].panel && arbitration.sessions[0].panel.length > 0) {
                   panelMembers = arbitration.sessions[0].panel;
                 }
                 // If not in sessions, check if it exists in the main arbitration object (from panel_members field)
                 else if (arbitration.panel_members) {
                   try {
-                    panelMembers = typeof arbitration.panel_members === 'string' ? JSON.parse(arbitration.panel_members) : arbitration.panel_members;
+                    panelMembers = typeof arbitration.panel_members === 'string' 
+                      ? JSON.parse(arbitration.panel_members) 
+                      : arbitration.panel_members;
+                    
+                    // Ensure we have an array of strings
+                    if (Array.isArray(panelMembers)) {
+                      panelMembers = panelMembers.map((member: string | { name?: string }) => 
+                        typeof member === 'string' ? member : (member?.name || 'Unknown Member')
+                      );
+                    } else {
+                      panelMembers = [];
+                    }
                   } catch (e) {
                     console.error('Error parsing panel_members:', e);
                     panelMembers = [];
@@ -332,7 +377,21 @@ function ViewArbitrationModal({ open, onClose, arbitration, onSeePhotos, onRemov
   );
 }
 
-function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedule, onSettle }: { open: boolean, onClose: () => void, arbitration: any, onSave: (minutes: string, images: File[]) => void, onReschedule: (date: string, time: string, reason?: string) => void, onSettle: (agreements: string, remarks: string) => void }) {
+function StartArbitrationModal({ 
+  open, 
+  onClose, 
+  arbitration, 
+  onSave, 
+  onReschedule, 
+  onSettle 
+}: { 
+  open: boolean; 
+  onClose: () => void; 
+  arbitration: ArbitrationCase | null; 
+  onSave: (minutes: string, images: File[]) => void; 
+  onReschedule: (date: string, time: string, reason?: string) => void; 
+  onSettle: (agreements: string, remarks: string) => void; 
+}) {
   const [minutes, setMinutes] = useState("");
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -348,8 +407,21 @@ function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedul
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [warningModalMessage, setWarningModalMessage] = useState("");
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [slotInfo, setSlotInfo] = useState<any>(null);
+  interface SlotInfo {
+    date: string;
+    availableSlots?: Array<{
+      time: string;
+      isAvailable: boolean;
+    }>;
+    scheduledTimes?: string[];
+    isFull?: boolean;
+    usedSlots?: number;
+    maxSlots?: number;
+  }
+  
+  const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
 
   useEffect(() => {
@@ -390,11 +462,12 @@ function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedul
         const data = await response.json();
         // Backend returns data in nested data property
         setSlotInfo({
-          availableSlots: data.data.availableSlots,
-          usedSlots: data.data.usedSlots,
-          maxSlots: data.data.maxSlotsPerDay,
-          scheduledTimes: data.data.scheduledTimes,
-          isFull: data.data.isFull
+          date: reschedDate, // Add the date from the reschedule date picker
+          availableSlots: data.data.availableSlots || [],
+          usedSlots: data.data.usedSlots || 0,
+          maxSlots: data.data.maxSlotsPerDay || 0,
+          scheduledTimes: data.data.scheduledTimes || [],
+          isFull: data.data.isFull || false
         });
         setBookedTimes(data.data.bookedTimes || []);
       } else {
@@ -531,6 +604,16 @@ function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedul
       // Validate that the scheduled date and time has occurred
       if (!isScheduledDateTimePassed()) {
         setWarning("You cannot start the arbitration yet. The scheduled date and time has not occurred.");
+        return;
+      }
+      
+      if (!minutes.trim()) {
+        setWarning("Please enter the minutes of the meeting.");
+        return;
+      }
+      
+      if (!arbitration) {
+        setWarning("No arbitration data available.");
         return;
       }
       
@@ -991,7 +1074,17 @@ function StartArbitrationModal({ open, onClose, arbitration, onSave, onReschedul
   );
 }
 
-function SettlementModal({ open, onClose, arbitration, onSave }: { open: boolean, onClose: () => void, arbitration: any, onSave: (agreements: string, remarks: string) => void }) {
+function SettlementModal({ 
+  open, 
+  onClose, 
+  arbitration, 
+  onSave 
+}: { 
+  open: boolean; 
+  onClose: () => void; 
+  arbitration: ArbitrationCase | null; 
+  onSave: (agreements: string, remarks: string) => void; 
+}) {
   const [agreements, setAgreements] = useState("");
   const [remarks, setRemarks] = useState("");
 
@@ -1038,7 +1131,7 @@ function SettlementModal({ open, onClose, arbitration, onSave }: { open: boolean
             <label className="block text-sm font-medium text-gray-700 mb-2">Settlement Agreements *</label>
             <textarea
               value={agreements}
-              onChange={(e) => setAgreements(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setAgreements(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               rows={4}
               placeholder="Enter the settlement agreements reached through arbitration..."
@@ -1050,7 +1143,7 @@ function SettlementModal({ open, onClose, arbitration, onSave }: { open: boolean
             <label className="block text-sm font-medium text-gray-700 mb-2">Remarks (Optional)</label>
             <textarea
               value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRemarks(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               rows={3}
               placeholder="Additional remarks about the settlement..."
@@ -1080,10 +1173,6 @@ function SettlementModal({ open, onClose, arbitration, onSave }: { open: boolean
 
 export default function ArbitrationPage() {
   const [arbitrations, setArbitrations] = useState<ArbitrationCase[]>([]);
-  const [luponMembers, setLuponMembers] = useState<{ id: number; name: string }[]>([]);
-
-  const [sortBy, setSortBy] = useState("date");
-  const [sortOrder, setSortOrder] = useState("desc");
   const [showViewModal, setShowViewModal] = useState(false);
   const [showStartModal, setShowStartModal] = useState(false);
   const [showPhotosModal, setShowPhotosModal] = useState(false);
@@ -1095,26 +1184,11 @@ export default function ArbitrationPage() {
   const [showStartSuccess, setShowStartSuccess] = useState(false);
   const [showRescheduleSuccess, setShowRescheduleSuccess] = useState(false);
   const [showSettlementModal, setShowSettlementModal] = useState(false);
-  const [settlementArbitration, setSettlementArbitration] = useState<ArbitrationCase | null>(null);
   const [showSettlementSuccess, setShowSettlementSuccess] = useState(false);
   const [showFormsModal, setShowFormsModal] = useState(false);
   const [selectedArbitrationForForms, setSelectedArbitrationForForms] = useState<ArbitrationCase | null>(null);
 
-  // Function to fetch fresh Lupon member data
-  const fetchLuponMembers = async () => {
-    try {
-      const response = await fetch('http://localhost:5000/api/lupon-members');
-      if (response.ok) {
-        const members = await response.json();
-        setLuponMembers(members.map((m: any) => ({ 
-          id: m.id, 
-          name: m.display_name || m.name || `${m.firstname || ''} ${m.lastname || ''}`.trim() 
-        })));
-      }
-    } catch (error) {
-      console.error('Failed to fetch Lupon members:', error);
-    }
-  };
+
 
   // Fetch arbitrations from API
   const fetchArbitrations = async () => {
@@ -1147,6 +1221,27 @@ export default function ArbitrationPage() {
           documentation: Array.isArray(arb.documentation) ? arb.documentation : (arb.documentation ? JSON.parse(arb.documentation) : [])
         }];
         
+        // Process panel_members - handle both string (JSON) and array formats
+        let panelMembers: Array<{id: string | number; name: string}> = [];
+        if (arb.panel_members) {
+          try {
+            // If panel_members is a string, parse it as JSON
+            const parsedMembers = typeof arb.panel_members === 'string' 
+              ? JSON.parse(arb.panel_members)
+              : arb.panel_members;
+              
+            // Ensure we have an array of objects with id and name
+            if (Array.isArray(parsedMembers)) {
+              panelMembers = parsedMembers.map((member: any, i: number) => ({
+                id: member?.id || i,
+                name: typeof member === 'string' ? member : (member?.name || `Panel Member ${i + 1}`)
+              }));
+            }
+          } catch (e) {
+            console.error('Error parsing panel_members:', e);
+          }
+        }
+        
         return {
           id: arb.id,
           complaint_id: arb.complaint_id,
@@ -1155,8 +1250,7 @@ export default function ArbitrationPage() {
           respondents: arb.respondent ? [arb.respondent] : [],
           time_elapse: calculateTimeElapse(arb.created_at),
           sessions: sessions,
-          // Add panel_members data from the API response
-          panel_members: arb.panel_members
+          panel_members: panelMembers
         };
       });
       
@@ -1181,38 +1275,10 @@ export default function ArbitrationPage() {
 
   useEffect(() => {
     fetchArbitrations();
-    fetchLuponMembers();
   }, []);
 
-  // Add event listener for storage changes to sync with settings page
-  useEffect(() => {
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'lupon_roster_updated') {
-        console.log('Lupon roster updated, refreshing member data...');
-        fetchLuponMembers();
-        // Remove the flag after processing
-        localStorage.removeItem('lupon_roster_updated');
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    
-    // Also check for updates when the window gains focus (for same-tab updates)
-    const handleFocus = () => {
-      if (localStorage.getItem('lupon_roster_updated')) {
-        console.log('Lupon roster updated (same tab), refreshing member data...');
-        fetchLuponMembers();
-        localStorage.removeItem('lupon_roster_updated');
-      }
-    };
-
-    window.addEventListener('focus', handleFocus);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, []);
+  // Storage and focus event listeners removed as they were only used for luponMembers
+  // which has been removed from this component
 
   const sortedCases = [...arbitrations].sort((a, b) => {
     const aDays = parseInt(a.time_elapse.split("/")[0], 10);
@@ -1238,8 +1304,8 @@ export default function ArbitrationPage() {
     }
     const d = new Date(`1970-01-01T${timeStr}`);
     if (!isNaN(d.getTime())) {
-      let h = d.getHours();
-      let m = d.getMinutes();
+      const h = d.getHours();
+      const m = d.getMinutes();
       const ampm = h >= 12 ? "PM" : "AM";
       const hour = h % 12 === 0 ? 12 : h % 12;
       return `${hour.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}` + ` ${ampm}`;
@@ -1339,7 +1405,7 @@ export default function ArbitrationPage() {
     }
   };
 
-  const handleSettlement = async (agreements: string, remarks: string) => {
+  const handleSettlement = async (agreements: string, remarks: string): Promise<void> => {
     if (!startArbitration) {
       console.error('No arbitration data available for settlement');
       return;
@@ -1488,7 +1554,7 @@ export default function ArbitrationPage() {
       <SettlementModal
         open={showSettlementModal}
         onClose={() => setShowSettlementModal(false)}
-        arbitration={settlementArbitration}
+        arbitration={startArbitration}
         onSave={handleSettlement}
       />
       {showStartSuccess && (

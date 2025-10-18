@@ -170,6 +170,7 @@ function ViewMediationModal({ open, onClose, mediation, onSeePhotos, onRemoveSes
 
   // Debug: Log mediation data to see what we're working with
   console.log('ViewMediationModal - mediation data:', mediation);
+  console.log('ViewMediationModal - witness data:', mediation.witness);
   console.log('ViewMediationModal - documentation:', mediation.documentation);
   console.log('ViewMediationModal - documentation length:', mediation.documentation?.length);
 
@@ -541,7 +542,8 @@ function StartMediationModal({ open, onClose, mediation, onSave, onReschedule, s
   // Agreement handlers
   const handleAddAgreement = () => setAgreements(prev => [...prev, ""]);
   const handleRemoveAgreement = (idx: number) => setAgreements(prev => prev.filter((_, i) => i !== idx));
-  const handleAgreementChange = (idx: number, value: string) => setAgreements(prev => prev.map((a, i) => i === idx ? value : a));
+  const handleAgreementChange = (idx: number, value: string) => 
+    setAgreements(prev => prev.map((a, i) => i === idx ? value : a));
 
   // Always use sorted sessions for logic
   const sortedSessions = getSortedSessions(mediation?.sessions || []);
@@ -2471,6 +2473,14 @@ export default function MediationPage() {
     if (!selectedArbitrationCase) return;
     
     try {
+      console.log('Sending arbitration data:', {
+        complaint_id: selectedArbitrationCase.complaint_id,
+        date,
+        time,
+        panel_members: members.filter(m => m.trim() !== ''), // Filter out empty strings
+        lupon_panel: members.filter(m => m.trim() !== '') // Also include lupon_panel for backward compatibility
+      });
+      
       const res = await fetch("http://localhost:5000/api/arbitration/schedule", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2478,19 +2488,33 @@ export default function MediationPage() {
           complaint_id: selectedArbitrationCase.complaint_id,
           date,
           time,
-          panel: members,
+          panel_members: members.filter(m => m.trim() !== ''), // Filter out empty strings
+          lupon_panel: members.filter(m => m.trim() !== '') // Also include lupon_panel for backward compatibility
         }),
       });
       
       if (res.ok) {
+        const result = await res.json();
+        console.log('Arbitration scheduled successfully:', result);
         setShowArbitrationSuccess(true);
+        
+        // Update the local state to reflect the new arbitration
+        setMediationCases(prevCases => 
+          prevCases.map(c => 
+            c.complaint_id === selectedArbitrationCase.complaint_id 
+              ? { ...c, has_arbitration: true } 
+              : c
+          )
+        );
         
         // Redirect to arbitration page after a short delay to show the success modal
         setTimeout(() => {
           router.push('/admin-dashboard/arbitration');
         }, 2000); // 2 second delay to show the success modal
       } else {
-        alert("Failed to set arbitration schedule.");
+        const errorData = await res.json().catch(() => ({}));
+        console.error('Failed to set arbitration schedule:', errorData);
+        alert(`Failed to set arbitration schedule: ${errorData.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Error setting arbitration schedule:', error);

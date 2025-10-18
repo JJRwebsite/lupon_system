@@ -132,7 +132,7 @@ export default function Home() {
 
       {/* Hero Section */}
       <section id="home" className="relative min-h-screen flex items-center justify-center overflow-hidden pt-16">
-        {/* Background with gradient overlay */}
+        {/* Background gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900 via-blue-700 to-purple-800">
           <div className="absolute inset-0 bg-black/30"></div>
           {/* Decorative elements - responsive */}

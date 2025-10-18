@@ -37,6 +37,8 @@ export default function ResidentSelector({ label, value, onChange, required = fa
     barangay: ""
   });
   const [showEditForm, setShowEditForm] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [validationError, setValidationError] = useState("");
   const [editResident, setEditResident] = useState({
     firstname: "",
     lastname: "",
@@ -108,14 +110,84 @@ export default function ResidentSelector({ label, value, onChange, required = fa
     setShowCreateForm(false);
   };
 
+  // Function to check for duplicate residents with all matching fields
+  const checkForDuplicateResident = async (residentData: any) => {
+    try {
+      const response = await fetch("http://localhost:5000/api/residents");
+      if (response.ok) {
+        const allResidents = await response.json();
+        
+        // Normalize the input data for comparison
+        const normalizedInput = {
+          firstname: residentData.firstname.trim().toUpperCase(),
+          lastname: residentData.lastname.trim().toUpperCase(),
+          middlename: residentData.middlename.trim().toUpperCase(),
+          purok: residentData.purok.trim().toUpperCase(),
+          contact: residentData.contact.trim(),
+          barangay: residentData.barangay.trim().toUpperCase()
+        };
+        
+        // Check if any existing resident matches ALL fields
+        const duplicateResident = allResidents.find((resident: Resident) => {
+          const existingResident = {
+            firstname: (resident.firstname || "").trim().toUpperCase(),
+            lastname: (resident.lastname || "").trim().toUpperCase(),
+            middlename: (resident.middlename || "").trim().toUpperCase(),
+            purok: (resident.purok || "").trim().toUpperCase(),
+            contact: (resident.contact || "").trim(),
+            barangay: (resident.barangay || "").trim().toUpperCase()
+          };
+          
+          return existingResident.firstname === normalizedInput.firstname &&
+                 existingResident.lastname === normalizedInput.lastname &&
+                 existingResident.middlename === normalizedInput.middlename &&
+                 existingResident.purok === normalizedInput.purok &&
+                 existingResident.contact === normalizedInput.contact &&
+                 existingResident.barangay === normalizedInput.barangay;
+        });
+        
+        return duplicateResident;
+      }
+    } catch (error) {
+      console.error("Error checking for duplicates:", error);
+    }
+    return null;
+  };
+
   const handleCreateResident = async () => {
     if (!newResident.firstname.trim() || !newResident.lastname.trim()) return;
+    if (isCreating) return; // Prevent duplicate submissions
 
+    setIsCreating(true);
+    setValidationError(""); // Clear any previous validation errors
+    
     try {
+      // First, check for duplicate residents with all matching fields
+      const duplicateResident = await checkForDuplicateResident(newResident);
+      
+      if (duplicateResident) {
+        setValidationError(
+          `A resident with the same information already exists: ${duplicateResident.display_name}. ` +
+          `Please verify the details or select the existing resident instead.`
+        );
+        setIsCreating(false);
+        return;
+      }
+      
+      // Normalize data to prevent duplicates due to inconsistent formatting
+      const normalizedResident = {
+        firstname: newResident.firstname.trim().toUpperCase(),
+        lastname: newResident.lastname.trim().toUpperCase(),
+        middlename: newResident.middlename.trim().toUpperCase(),
+        purok: newResident.purok.trim(),
+        contact: newResident.contact.trim(),
+        barangay: newResident.barangay.trim()
+      };
+
       const response = await fetch("http://localhost:5000/api/residents", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newResident),
+        body: JSON.stringify(normalizedResident),
       });
 
       if (response.ok) {
@@ -124,22 +196,26 @@ export default function ResidentSelector({ label, value, onChange, required = fa
           // Create resident object from the form data and returned ID
           const createdResident = {
             id: result.resident_id,
-            firstname: newResident.firstname,
-            lastname: newResident.lastname,
-            middlename: newResident.middlename,
-            display_name: result.display_name || `${newResident.lastname.toUpperCase()}, ${newResident.firstname.toUpperCase()}${newResident.middlename ? ' ' + newResident.middlename.toUpperCase() : ''}`,
-            purok: newResident.purok,
-            contact: newResident.contact,
-            barangay: newResident.barangay
+            firstname: normalizedResident.firstname,
+            lastname: normalizedResident.lastname,
+            middlename: normalizedResident.middlename,
+            display_name: result.display_name || `${normalizedResident.lastname}, ${normalizedResident.firstname}${normalizedResident.middlename ? ' ' + normalizedResident.middlename : ''}`,
+            purok: normalizedResident.purok,
+            contact: normalizedResident.contact,
+            barangay: normalizedResident.barangay
           };
           onChange(createdResident);
           setIsOpen(false);
           setShowCreateForm(false);
           setNewResident({ firstname: "", lastname: "", middlename: "", purok: "", contact: "", barangay: "" });
         }
+      } else {
+        console.error("Failed to create resident:", response.statusText);
       }
     } catch (error) {
       console.error("Error creating resident:", error);
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -419,7 +495,10 @@ export default function ResidentSelector({ label, value, onChange, required = fa
                           type="text"
                           required
                           value={newResident.lastname}
-                          onChange={(e) => setNewResident(prev => ({ ...prev, lastname: e.target.value }))}
+                          onChange={(e) => {
+                            setNewResident(prev => ({ ...prev, lastname: e.target.value }));
+                            setValidationError(""); // Clear validation error when user types
+                          }}
                           className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-400 transition-all duration-200 bg-gray-50 focus:bg-white"
                           placeholder="Last name"
                         />
@@ -432,7 +511,10 @@ export default function ResidentSelector({ label, value, onChange, required = fa
                           type="text"
                           required
                           value={newResident.firstname}
-                          onChange={(e) => setNewResident(prev => ({ ...prev, firstname: e.target.value }))}
+                          onChange={(e) => {
+                            setNewResident(prev => ({ ...prev, firstname: e.target.value }));
+                            setValidationError(""); // Clear validation error when user types
+                          }}
                           className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-400 transition-all duration-200 bg-gray-50 focus:bg-white"
                           placeholder="First name"
                         />
@@ -444,7 +526,10 @@ export default function ResidentSelector({ label, value, onChange, required = fa
                         <input
                           type="text"
                           value={newResident.middlename}
-                          onChange={(e) => setNewResident(prev => ({ ...prev, middlename: e.target.value }))}
+                          onChange={(e) => {
+                            setNewResident(prev => ({ ...prev, middlename: e.target.value }));
+                            setValidationError(""); // Clear validation error when user types
+                          }}
                           className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-400 transition-all duration-200 bg-gray-50 focus:bg-white"
                           placeholder="Middle name (optional)"
                         />
@@ -455,7 +540,10 @@ export default function ResidentSelector({ label, value, onChange, required = fa
                       <input
                         type="text"
                         value={newResident.purok}
-                        onChange={(e) => setNewResident(prev => ({ ...prev, purok: e.target.value }))}
+                        onChange={(e) => {
+                          setNewResident(prev => ({ ...prev, purok: e.target.value }));
+                          setValidationError(""); // Clear validation error when user types
+                        }}
                         className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-400 transition-all duration-200 bg-gray-50 focus:bg-white"
                         placeholder="Enter purok"
                       />
@@ -465,22 +553,58 @@ export default function ResidentSelector({ label, value, onChange, required = fa
                       <input
                         type="text"
                         value={newResident.contact}
-                        onChange={(e) => setNewResident(prev => ({ ...prev, contact: e.target.value }))}
+                        onChange={(e) => {
+                          setNewResident(prev => ({ ...prev, contact: e.target.value }));
+                          setValidationError(""); // Clear validation error when user types
+                        }}
                         className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-400 transition-all duration-200 bg-gray-50 focus:bg-white"
                         placeholder="Enter contact number"
                       />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Barangay</label>
-                      <input
-                        type="text"
+                      <select
                         value={newResident.barangay}
-                        onChange={(e) => setNewResident(prev => ({ ...prev, barangay: e.target.value }))}
+                        onChange={(e) => {
+                          setNewResident(prev => ({ ...prev, barangay: e.target.value }));
+                          setValidationError(""); // Clear validation error when user types
+                        }}
                         className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-400 transition-all duration-200 bg-gray-50 focus:bg-white"
-                        placeholder="Enter barangay"
-                      />
+                      >
+                        <option value="">Select barangay</option>
+                        <option value="Alegria">Alegria</option>
+                        <option value="Bangbang">Bangbang</option>
+                        <option value="Buagsong">Buagsong</option>
+                        <option value="Catarman">Catarman</option>
+                        <option value="Cogon">Cogon</option>
+                        <option value="Dapitan">Dapitan</option>
+                        <option value="Day-as">Day-as</option>
+                        <option value="Gabi">Gabi</option>
+                        <option value="Gilutongan">Gilutongan</option>
+                        <option value="Ibabao">Ibabao</option>
+                        <option value="Pilipog">Pilipog</option>
+                        <option value="Poblacion">Poblacion</option>
+                        <option value="San Miguel">San Miguel</option>
+                      </select>
                     </div>
                   </div>
+
+                  {/* Validation Error Display */}
+                  {validationError && (
+                    <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0">
+                          <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-sm font-medium text-red-800">Duplicate Resident Found</h4>
+                          <p className="text-sm text-red-700 mt-1">{validationError}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex space-x-3 pt-4 border-t border-gray-100">
                     <button
@@ -493,10 +617,17 @@ export default function ResidentSelector({ label, value, onChange, required = fa
                     <button
                       type="button"
                       onClick={handleCreateResident}
-                      disabled={!newResident.firstname.trim() || !newResident.lastname.trim()}
+                      disabled={!newResident.firstname.trim() || !newResident.lastname.trim() || isCreating}
                       className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     >
-                      Create
+                      {isCreating ? (
+                        <div className="flex items-center justify-center space-x-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                          <span>Creating...</span>
+                        </div>
+                      ) : (
+                        "Create"
+                      )}
                     </button>
                   </div>
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ChartBarIcon, DocumentTextIcon, ClockIcon, CheckCircleIcon, TrashIcon, UserGroupIcon, ArrowLeftOnRectangleIcon, Cog6ToothIcon, InboxIcon, ArrowTopRightOnSquareIcon, Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
+import { ChartBarIcon, DocumentTextIcon, ClockIcon, CheckCircleIcon, TrashIcon, UserGroupIcon, ArrowLeftOnRectangleIcon, Cog6ToothIcon, InboxIcon, ArrowTopRightOnSquareIcon, Bars3Icon, XMarkIcon, ScaleIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import { getCurrentUser, logout, isAuthenticated } from "../../utils/auth";
 
@@ -12,7 +12,7 @@ const navLinks = [
   { label: "Withdraw Cases", icon: TrashIcon, href: "/admin-dashboard/withdrawn-cases" },
   { label: "Mediation", icon: InboxIcon, href: "/admin-dashboard/mediation" },
   { label: "Conciliation", icon: UserGroupIcon, href: "/admin-dashboard/conciliation" },
-  { label: "Arbitration", icon: UserGroupIcon, href: "/admin-dashboard/arbitration" },
+  { label: "Arbitration", icon: ScaleIcon, href: "/admin-dashboard/arbitration" },
   { label: "Settlement", icon: CheckCircleIcon, href: "/admin-dashboard/settlement" },
   { label: "Reports", icon: ChartBarIcon, href: "/admin-dashboard/reports" },
   { label: "Settings", icon: Cog6ToothIcon, href: "/admin-dashboard/settings" },

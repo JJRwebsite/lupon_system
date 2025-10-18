@@ -104,11 +104,14 @@ async function listAllMediationsDetailed(connection) {
            TRIM(CONCAT(UPPER(COALESCE(comp.lastname,'')), ', ', UPPER(COALESCE(comp.firstname,'')),
              CASE WHEN COALESCE(comp.middlename,'') <> '' THEN CONCAT(' ', UPPER(comp.middlename)) ELSE '' END)) AS complainant,
            TRIM(CONCAT(UPPER(COALESCE(resp.lastname,'')), ', ', UPPER(COALESCE(resp.firstname,'')),
-             CASE WHEN COALESCE(resp.middlename,'') <> '' THEN CONCAT(' ', UPPER(resp.middlename)) ELSE '' END)) AS respondent
+             CASE WHEN COALESCE(resp.middlename,'') <> '' THEN CONCAT(' ', UPPER(resp.middlename)) ELSE '' END)) AS respondent,
+           TRIM(CONCAT(UPPER(COALESCE(wit.lastname,'')), ', ', UPPER(COALESCE(wit.firstname,'')),
+             CASE WHEN COALESCE(wit.middlename,'') <> '' THEN CONCAT(' ', UPPER(wit.middlename)) ELSE '' END)) AS witness
     FROM mediation m
     LEFT JOIN complaints c ON m.complaint_id = c.id
     LEFT JOIN residents comp ON c.complainant_id = comp.id
     LEFT JOIN residents resp ON c.respondent_id = resp.id
+    LEFT JOIN residents wit ON c.witness_id = wit.id
     WHERE m.is_deleted = FALSE
     ORDER BY m.date DESC, m.time ASC
   `);

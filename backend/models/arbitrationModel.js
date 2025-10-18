@@ -41,12 +41,32 @@ async function listAllArbitrationsDetailed(connection) {
       JOIN complaints c ON a.complaint_id = c.id
       LEFT JOIN residents comp ON c.complainant_id = comp.id
       LEFT JOIN residents resp ON c.respondent_id = resp.id
+      WHERE a.is_deleted = false
       ORDER BY a.id DESC
     `);
     console.log('✅ listAllArbitrationsDetailed - Query successful, found rows:', rows.length);
     
-    // Get reschedule data for each arbitration (like mediation/conciliation)
+    // Process each arbitration
     for (let arbitration of rows) {
+      // Parse panel_members if it exists and is a string
+      if (arbitration.panel_members) {
+        try {
+          arbitration.panel_members = typeof arbitration.panel_members === 'string' 
+            ? JSON.parse(arbitration.panel_members)
+            : arbitration.panel_members;
+          
+          // Ensure panel_members is an array
+          if (!Array.isArray(arbitration.panel_members)) {
+            console.warn('panel_members is not an array for arbitration ID:', arbitration.id);
+            arbitration.panel_members = [];
+          }
+        } catch (e) {
+          console.error('Error parsing panel_members for arbitration ID:', arbitration.id, e);
+          arbitration.panel_members = [];
+        }
+      } else {
+        arbitration.panel_members = [];
+      }
       const [reschedules] = await connection.execute(`
         SELECT ar.id, ar.reschedule_date, ar.reschedule_time, ar.minutes, ar.reason, ar.documentation_id, ar.created_at,
                STRING_AGG(DISTINCT ad.file_path, ',') as documentation_files
