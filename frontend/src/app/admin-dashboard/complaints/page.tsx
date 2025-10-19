@@ -4,7 +4,7 @@ import { EyeIcon, PencilSquareIcon, TrashIcon, PlusCircleIcon, XMarkIcon, Docume
 import { useRouter } from "next/navigation";
 import ResidentSelector from "../../components/ResidentSelector";
 import SearchAndSort from "../components/SearchAndSort";
-import { applyFiltersAndSort, complaintStatusOptions } from "../components/searchUtils";
+import { applyFiltersAndSort, complaintStatusOptions, BaseSearchableObject } from "../components/searchUtils";
 
 interface Resident {
   id: number;
@@ -17,7 +17,7 @@ interface Resident {
   barangay: string;
 }
 
-interface Complaint {
+interface Complaint extends BaseSearchableObject {
   id: number;
   case_title: string;
   complainant: Resident;
@@ -28,6 +28,7 @@ interface Complaint {
   nature_of_case?: string;
   relief_description?: string;
   date_filed?: string;
+  [key: string]: unknown; // Add index signature to match BaseSearchableObject
 }
 
 // Types for case options

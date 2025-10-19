@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, ChangeEvent } from "react";
+import { useState, useEffect, ChangeEvent, useCallback } from "react";
 import Image from 'next/image';
 import { EyeIcon, UsersIcon, ScaleIcon, PlayCircleIcon, XMarkIcon, DocumentTextIcon, IdentificationIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 
@@ -1195,10 +1195,7 @@ export default function ArbitrationPage() {
   const [showFormsModal, setShowFormsModal] = useState(false);
   const [selectedArbitrationForForms, setSelectedArbitrationForForms] = useState<ArbitrationCase | null>(null);
 
-
-
-  // Fetch arbitrations from API
-  const fetchArbitrations = async () => {
+  const fetchArbitrations = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch('http://localhost:5000/api/arbitration');
@@ -1305,7 +1302,7 @@ export default function ArbitrationPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // Calculate time elapsed since creation (matching conciliation logic)
   const calculateTimeElapse = (createdAt: string) => {
@@ -1317,7 +1314,7 @@ export default function ArbitrationPage() {
 
   useEffect(() => {
     fetchArbitrations();
-  }, []);
+  }, [fetchArbitrations]);
 
   // Storage and focus event listeners removed as they were only used for luponMembers
   // which has been removed from this component
