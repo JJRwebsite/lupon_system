@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-import { EyeIcon, PencilSquareIcon, TrashIcon, PlusCircleIcon, XMarkIcon, DocumentTextIcon, UserIcon, UsersIcon, IdentificationIcon, ArrowUturnLeftIcon, ExclamationTriangleIcon, CheckCircleIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
+import { EyeIcon, PencilSquareIcon, TrashIcon, PlusCircleIcon, XMarkIcon, DocumentTextIcon, UserIcon, UsersIcon, IdentificationIcon, ExclamationTriangleIcon, CheckCircleIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import ResidentSelector from "../../components/ResidentSelector";
 import SearchAndSort from "../components/SearchAndSort";
@@ -210,7 +210,7 @@ function CreateComplaintModal({ open, onClose, onSuccess }: { open: boolean; onC
 
   // No handlers needed for single parties - direct state updates
 
-  const handleComplaintSubmit = async (e: any) => {
+  const handleComplaintSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
     if (!validateForm()) {
@@ -260,7 +260,7 @@ function CreateComplaintModal({ open, onClose, onSuccess }: { open: boolean; onC
         const errorData = await response.json();
         setError(errorData.message || 'Failed to file complaint');
       }
-    } catch (error) {
+    } catch (_error) {
       setError('Network error. Please try again.');
     } finally {
       setSubmitting(false);
@@ -379,8 +379,8 @@ function CreateComplaintModal({ open, onClose, onSuccess }: { open: boolean; onC
                         disabled={!natureOfCase}
                       >
                         <option value="">Select a case title</option>
-                        {natureOfCase && (caseTitleOptions[natureOfCase] || []).map((title, idx) => {
-                          const cebu = (caseTitleOptionsCebuano[natureOfCase] || [])[idx];
+                        {natureOfCase && (caseTitleOptions[natureOfCase] || []).map((title, _idx) => {
+                          const cebu = (caseTitleOptionsCebuano[natureOfCase] || [])[_idx];
                           const display = cebu ? `${title} (${cebu})` : title;
                           return (
                             <option key={title} value={title}>{display}</option>
@@ -589,11 +589,24 @@ function CreateComplaintModal({ open, onClose, onSuccess }: { open: boolean; onC
   );
 }
 
-function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: { open: boolean; onClose: () => void; onSuccess: () => void; complaint: any; onUpdate?: (updatedComplaint: any) => void }) {
-  const [caseTitle, setCaseTitle] = useState(complaint?.case_title || "");
-  const [caseDescription, setCaseDescription] = useState(complaint?.case_description || "");
-  const [natureOfCase, setNatureOfCase] = useState(complaint?.nature_of_case || "");
-  const [reliefDescription, setReliefDescription] = useState(complaint?.relief_description || "");
+interface EditComplaintModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+  complaint: Complaint | null;
+  onUpdate?: (updatedComplaint: Complaint) => void;
+}
+
+function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: EditComplaintModalProps) {
+  // Early return if no complaint is provided
+  if (!complaint) {
+    return null;
+  }
+
+  const [caseTitle, setCaseTitle] = useState(complaint.case_title || "");
+  const [caseDescription, setCaseDescription] = useState(complaint.case_description || "");
+  const [natureOfCase, setNatureOfCase] = useState(complaint.nature_of_case || "");
+  const [reliefDescription, setReliefDescription] = useState(complaint.relief_description || "");
   const [otherCaseTitle, setOtherCaseTitle] = useState("");
 
   const natureCaseOptions = [
@@ -673,7 +686,7 @@ function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: {
     }
   }, [open, complaint]);
 
-  const handleUpdate = async (e: any) => {
+  const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSubmitting(true);
     setError("");
@@ -726,8 +739,9 @@ function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: {
       
       onSuccess();
       onClose();
-    } catch (err: any) {
-      setError(err.message || "Unknown error");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
+      setError(errorMessage);
     } finally {
       setSubmitting(false);
     }
@@ -858,7 +872,13 @@ function formatTime(dateStr?: string) {
   return `${hours}:${mins} ${ampm}`;
 }
 
-function ViewCaseModal({ open, onClose, caseData }: { open: boolean, onClose: () => void, caseData: any }) {
+interface ViewCaseModalProps {
+  open: boolean;
+  onClose: () => void;
+  caseData: Complaint | null;
+}
+
+function ViewCaseModal({ open, onClose, caseData }: ViewCaseModalProps) {
   if (!open || !caseData) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -882,7 +902,7 @@ function ViewCaseModal({ open, onClose, caseData }: { open: boolean, onClose: ()
                   <span className="font-medium text-gray-700">Case Title:</span> <span className="text-gray-900">{caseData.case_title}</span>
                 </div>
                 <div>
-                  <span className="font-medium text-gray-700">Nature:</span> <span className="text-gray-900">{caseData.nature_of_case || caseData.case_nature || 'N/A'}</span>
+                  <span className="font-medium text-gray-700">Nature:</span> <span className="text-gray-900">{caseData.nature_of_case || 'N/A'}</span>
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Status:</span> <span className="text-gray-900">{caseData.status}</span>
@@ -1028,7 +1048,14 @@ function ViewCaseModal({ open, onClose, caseData }: { open: boolean, onClose: ()
   );
 }
 
-function WithdrawConfirmationModal({ open, onClose, onConfirm, caseData }: { open: boolean; onClose: () => void; onConfirm: () => void; caseData: any }) {
+interface WithdrawConfirmationModalProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  caseData: Complaint | null;
+}
+
+function WithdrawConfirmationModal({ open, onClose, onConfirm, caseData }: WithdrawConfirmationModalProps) {
   if (!open || !caseData) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1056,7 +1083,14 @@ function WithdrawConfirmationModal({ open, onClose, onConfirm, caseData }: { ope
   );
 }
 
-function ReferralConfirmationModal({ open, onClose, onConfirm, caseData }: { open: boolean; onClose: () => void; onConfirm: (referredTo: string, reason: string) => void; caseData: any }) {
+interface ReferralConfirmationModalProps {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: (referredTo: string, reason: string) => void;
+  caseData: Complaint | null;
+}
+
+function ReferralConfirmationModal({ open, onClose, onConfirm, caseData }: ReferralConfirmationModalProps) {
   const [referredTo, setReferredTo] = useState("");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1148,6 +1182,13 @@ interface FormsModalProps {
   handleDownloadPDF: (formNo: number, complaint: Complaint) => void;
 }
 
+interface FormsModalProps {
+  open: boolean;
+  onClose: () => void;
+  complaint: Complaint | null;
+  handleDownloadPDF: (formNo: number, complaint: Complaint) => void;
+}
+
 const FormsModal = ({ open, onClose, complaint, handleDownloadPDF }: FormsModalProps) => {
   if (!open || !complaint) return null;
 
@@ -1159,8 +1200,8 @@ const FormsModal = ({ open, onClose, complaint, handleDownloadPDF }: FormsModalP
           <button onClick={onClose} style={{ fontSize: 28, background: "none", border: "none", cursor: "pointer" }}>&times;</button>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 32 }}>
-          {[7, 8, 9].map((formNo) => {
-            const formTitles = {
+          {[7, 8, 9].map((formNo: number) => {
+            const formTitles: Record<number, string> = {
               7: "Complaint",
               8: "Notice of Hearing",
               9: "Summons"
@@ -1171,8 +1212,14 @@ const FormsModal = ({ open, onClose, complaint, handleDownloadPDF }: FormsModalP
                   <span style={{ color: "#aaa" }}>[Preview]</span>
                 </div>
                 <div style={{ marginBottom: 4, fontWeight: 500 }}>KP Form No. {formNo}</div>
-                <div style={{ marginBottom: 8, fontSize: 12, color: "#666" }}>{formTitles[formNo as keyof typeof formTitles]}</div>
-                <button onClick={() => handleDownloadPDF(formNo, complaint)} style={{ width: "100%", background: "#5b9bd5", color: "#fff", border: "none", padding: 8, borderRadius: 4, fontWeight: 500, cursor: "pointer" }}>Download</button>
+                <div style={{ marginBottom: 8, fontSize: 12, color: "#666" }}>{formTitles[formNo] || `Form ${formNo}`}</div>
+                <button 
+                  onClick={() => complaint && handleDownloadPDF(formNo, complaint)} 
+                  style={{ width: "100%", background: "#5b9bd5", color: "#fff", border: "none", padding: 8, borderRadius: 4, fontWeight: 500, cursor: "pointer" }}
+                  disabled={!complaint}
+                >
+                  Download
+                </button>
               </div>
             );
           })}
@@ -1193,22 +1240,19 @@ export default function ComplaintsPage() {
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [viewComplaint, setViewComplaint] = useState<any>(null);
+  const [viewComplaint, setViewComplaint] = useState<Complaint | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editComplaint, setEditComplaint] = useState<any>(null);
+  const [editComplaint, setEditComplaint] = useState<Complaint | null>(null);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [withdrawComplaint, setWithdrawComplaint] = useState<any>(null);
+  const [withdrawComplaint, setWithdrawComplaint] = useState<Complaint | null>(null);
   const [showFormsModal, setShowFormsModal] = useState(false);
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
-  const [pdfFormNo, setPdfFormNo] = useState<number | null>(null);
-  const [pdfComplaint, setPdfComplaint] = useState<any>(null);
-  const pdfRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
   const [showWithdrawSuccess, setShowWithdrawSuccess] = useState(false);
   const [showCreateSuccess, setShowCreateSuccess] = useState(false);
   const [showEditSuccess, setShowEditSuccess] = useState(false);
   const [showReferralModal, setShowReferralModal] = useState(false);
-  const [referralComplaint, setReferralComplaint] = useState<any>(null);
+  const [referralComplaint, setReferralComplaint] = useState<Complaint | null>(null);
   const [showReferralSuccess, setShowReferralSuccess] = useState(false);
 
   const fetchComplaints = async () => {
@@ -1219,8 +1263,9 @@ export default function ComplaintsPage() {
       if (!res.ok) throw new Error("Failed to fetch complaints");
       const data = await res.json();
       setComplaints(data);
-    } catch (e: any) {
-      setError(e.message || "Unknown error");
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'An unknown error occurred';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -1233,12 +1278,12 @@ export default function ComplaintsPage() {
       setShowWithdrawSuccess(true);
       setTimeout(() => setShowWithdrawSuccess(false), 2500);
       setComplaints(prev => prev.filter(c => c.id !== id));
-    } catch (err) {
+    } catch {
       alert("Error withdrawing complaint.");
     }
   };
 
-  const handleWithdrawClick = (complaint: any) => {
+  const handleWithdrawClick = (complaint: Complaint) => {
     setWithdrawComplaint(complaint);
     setShowWithdrawModal(true);
   };
@@ -1250,10 +1295,6 @@ export default function ComplaintsPage() {
     }
   };
 
-  const handleReferralClick = (complaint: any) => {
-    setReferralComplaint(complaint);
-    setShowReferralModal(true);
-  };
 
   const handleReferral = async (referredTo: string, reason: string) => {
     if (!referralComplaint) return;
@@ -1283,7 +1324,8 @@ export default function ComplaintsPage() {
       setTimeout(() => {
         router.push(`/admin-dashboard/referrals?highlight=${result.referralId}`);
       }, 2500);
-    } catch (err) {
+    } catch (err: unknown) {
+      console.error('Error referring complaint:', err);
       alert("Error referring complaint.");
     }
   };
@@ -1319,7 +1361,7 @@ export default function ComplaintsPage() {
         try {
           const mediationResponse = await fetch('http://localhost:5000/api/mediation');
           const mediations = await mediationResponse.json();
-          const mediationSchedule = mediations.find((m: any) => m.complaint_id === complaint.id);
+          const mediationSchedule = mediations.find((m: { complaint_id: number }) => m.complaint_id === complaint.id);
           
           const currentDate = new Date().toISOString().split('T')[0];
           let hearingDate = currentDate;
@@ -1380,7 +1422,7 @@ export default function ComplaintsPage() {
         try {
           const mediationResponse = await fetch('http://localhost:5000/api/mediation');
           const mediations = await mediationResponse.json();
-          const mediationSchedule = mediations.find((m: any) => m.complaint_id === complaint.id);
+          const mediationSchedule = mediations.find((m: { complaint_id: number }) => m.complaint_id === complaint.id);
           
           const currentDate = new Date().toISOString().split('T')[0];
           let hearingDate = currentDate;
@@ -1471,9 +1513,9 @@ export default function ComplaintsPage() {
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
       
-    } catch (error) {
-      console.error('Error downloading PDF:', error);
-      alert('Failed to download PDF. Please try again.');
+    } catch (error: unknown) {
+      console.error('Error generating PDF:', error instanceof Error ? error.message : 'Unknown error');
+      alert(`Failed to generate PDF: ${error instanceof Error ? error.message : 'An unknown error occurred'}`);
     }
   };
 
