@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, ChangeEvent } from "react";
+import Image from "next/image";
 import { EyeIcon, UsersIcon, ScaleIcon, PlayCircleIcon, XMarkIcon, DocumentTextIcon, IdentificationIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 import SetArbitrationModalComplete from "../../../components/SetArbitrationModalComplete";
 
@@ -9,7 +10,16 @@ interface ConciliationSession {
   schedule_time: string;
   conciliation_minutes: string;
   documentation: string[];
-  reschedules?: any[];
+  reschedules?: Array<{
+    id: number;
+    schedule_date: string;
+    schedule_time: string;
+    conciliation_minutes: string;
+    documentation: string[];
+    panel?: string[];
+    reason?: string;
+    created_at?: string;
+  }>;
   panel?: string[];
   reason?: string;
 }
@@ -23,6 +33,7 @@ interface ConciliationCase {
   respondents: string[];
   time_elapse: string;
   sessions: ConciliationSession[];
+  lupon_panel?: string | string[];
 }
 
 // Utility: Always sort sessions by ID (oldest to newest)
@@ -30,15 +41,39 @@ function getSortedSessions(sessions: ConciliationSession[]): ConciliationSession
   return [...sessions].sort((a, b) => a.id - b.id);
 }
 
+interface ConciliationReschedule {
+  id: number;
+  reschedule_date: string;
+  reschedule_time: string;
+  reason?: string;
+  created_at?: string;
+  documentation?: string[];
+}
+
+interface LuponMember {
+  id: number;
+  firstname?: string;
+  lastname?: string;
+  name?: string;
+  display_name?: string;
+}
+
+interface ConciliationWithReschedules {
+  reschedules?: ConciliationReschedule[];
+  date?: string;
+  time?: string;
+  status?: string;
+}
+
 // Helper function to calculate time elapsed from scheduled date
-function calculateTimeElapseFromSchedule(conciliationGroup: any[]): number {
+function calculateTimeElapseFromSchedule(conciliationGroup: ConciliationWithReschedules[]): number {
   // Find the earliest scheduled date from all conciliation sessions
   let earliestScheduledDate: string | null = null;
   
   conciliationGroup.forEach(con => {
     // Check if this conciliation has reschedules with scheduled dates
     if (con.reschedules && Array.isArray(con.reschedules)) {
-      con.reschedules.forEach((reschedule: any) => {
+      con.reschedules.forEach((reschedule: ConciliationReschedule) => {
         if (reschedule.reschedule_date) {
           if (!earliestScheduledDate || new Date(reschedule.reschedule_date) < new Date(earliestScheduledDate)) {
             earliestScheduledDate = reschedule.reschedule_date;
@@ -276,7 +311,16 @@ function SeePhotosModal({ open, onClose, images }: { open: boolean, onClose: () 
         </div>
         <div className="bg-gray-100 border border-gray-300 rounded-lg p-6 flex flex-wrap gap-4 justify-center">
           {images.map((src, idx) => (
-            <img key={idx} src={src} alt={`doc-${idx}`} className="h-48 w-48 object-cover rounded border" />
+            <Image 
+              key={idx} 
+              src={src} 
+              alt={`doc-${idx}`} 
+              width={192} 
+              height={192} 
+              className="object-cover rounded border"
+              style={{ width: '192px', height: '192px' }}
+              unoptimized={src.startsWith('blob:')}
+            />
           ))}
         </div>
       </div>
@@ -284,7 +328,21 @@ function SeePhotosModal({ open, onClose, images }: { open: boolean, onClose: () 
   );
 }
 
-function ViewConciliationModal({ open, onClose, conciliation, onSeePhotos, onRemoveSession, luponMembers }: { open: boolean, onClose: () => void, conciliation: any, onSeePhotos: (images: string[]) => void, onRemoveSession: (idx: number) => void, luponMembers: { id: number; name: string }[] }) {
+interface ViewConciliationModalProps {
+  open: boolean;
+  onClose: () => void;
+  conciliation: ConciliationCase;
+  onSeePhotos: (images: string[]) => void;
+  onRemoveSession: (idx: number) => void;
+}
+
+function ViewConciliationModal({ 
+  open, 
+  onClose, 
+  conciliation, 
+  onSeePhotos, 
+  onRemoveSession 
+}: ViewConciliationModalProps) {
   if (!open || !conciliation) return null;
   
   // Debug logging to see what data we're receiving
@@ -531,7 +589,23 @@ function ViewConciliationModal({ open, onClose, conciliation, onSeePhotos, onRem
   );
 }
 
-function StartConciliationModal({ open, onClose, conciliation, onSave, onReschedule, setShowSettlementSuccess }: { open: boolean, onClose: () => void, conciliation: any, onSave: (minutes: string, images: File[]) => void, onReschedule: (date: string, time: string, reason?: string) => void, setShowSettlementSuccess: (show: boolean) => void }) {
+interface StartConciliationModalProps {
+  open: boolean;
+  onClose: () => void;
+  conciliation: ConciliationCase;
+  onSave: (minutes: string, images: File[]) => void;
+  onReschedule: (date: string, time: string, reason?: string) => void;
+  setShowSettlementSuccess: (show: boolean) => void;
+}
+
+function StartConciliationModal({ 
+  open, 
+  onClose, 
+  conciliation, 
+  onSave, 
+  onReschedule, 
+  setShowSettlementSuccess 
+}: StartConciliationModalProps) {
   const [minutes, setMinutes] = useState("");
   const [images, setImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -545,7 +619,9 @@ function StartConciliationModal({ open, onClose, conciliation, onSave, onResched
   const [remarks, setRemarks] = useState("");
   const [reschedReason, setReschedReason] = useState("");
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [slotInfo, setSlotInfo] = useState<any>(null);
+  
+  
+  const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
 
@@ -993,7 +1069,15 @@ function StartConciliationModal({ open, onClose, conciliation, onSave, onResched
                     <div className="flex flex-wrap gap-2 mt-2">
                       {previews.map((src, idx) => (
                         <div key={idx} className="relative inline-block">
-                          <img src={src} alt={`doc-${idx}`} className="h-20 w-20 object-cover rounded border" />
+                          <Image 
+                            src={src} 
+                            alt={`doc-${idx}`} 
+                            width={80} 
+                            height={80} 
+                            className="object-cover rounded border"
+                            style={{ width: '80px', height: '80px' }}
+                            unoptimized={src.startsWith('blob:')}
+                          />
                           <button type="button" onClick={() => handleRemoveImage(idx)} className="absolute -top-2 -right-2 bg-white border border-gray-400 rounded-full p-1 shadow hover:bg-red-500 hover:text-white transition-colors">
                             <XMarkIcon className="h-4 w-4" />
                           </button>
@@ -1284,13 +1368,39 @@ function StartConciliationModal({ open, onClose, conciliation, onSave, onResched
   );
 }
 
-function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase }: { open: boolean, onClose: () => void, onSave: (date: string, time: string, members: string[]) => void, arbitrators: { id: string; name: string }[], selectedCase?: any }) {
+interface SlotInfo {
+  isFull: boolean;
+  availableSlots: number;
+  usedSlots: number;
+  maxSlots: number;
+  scheduledTimes: string[];
+  isReschedule?: boolean;
+}
+
+interface ArbitrationCase {
+  id?: number;
+  complaint_id?: number;
+  case_title?: string;
+  complainants?: string[];
+  respondents?: string[];
+  // Add other properties as needed based on usage
+}
+
+interface SetArbitrationModalProps {
+  open: boolean;
+  onClose: () => void;
+  onSave: (date: string, time: string, members: string[]) => void;
+  arbitrators: { id: string; name: string }[];
+  selectedCase?: ArbitrationCase;
+}
+
+function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase }: SetArbitrationModalProps) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [members, setMembers] = useState(["", "", ""]);
   const [warning, setWarning] = useState("");
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [slotInfo, setSlotInfo] = useState<any>(null);
+  const [slotInfo, setSlotInfo] = useState<SlotInfo | null>(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [bookedTimes, setBookedTimes] = useState<string[]>([]);
   const [showWarningModal, setShowWarningModal] = useState(false);
@@ -1505,7 +1615,18 @@ function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase 
   if (!open) return null;
 
   const calendarDays = generateCalendarDays();
-  const timeSlots = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"];
+  const timeSlots = [
+    { value: '08:00', display: '8:00 AM' },
+    { value: '09:00', display: '9:00 AM' },
+    { value: '10:00', display: '10:00 AM' },
+    { value: '11:00', display: '11:00 AM' },
+    { value: '13:00', display: '1:00 PM' },
+    { value: '14:00', display: '2:00 PM' },
+    { value: '15:00', display: '3:00 PM' },
+    { value: '16:00', display: '4:00 PM' },
+    { value: '17:00', display: '5:00 PM' },
+    { value: '18:00', display: '6:00 PM' }
+  ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1625,8 +1746,8 @@ function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase 
               </label>
               <div className="grid grid-cols-5 gap-2">
                 {timeSlots.map(slot => {
-                  const isBooked = bookedTimes.includes(slot);
-                  const isSelected = time === slot;
+                  const isBooked = bookedTimes.includes(slot.value);
+                  const isSelected = time === slot.value;
                   
                   // Check if time slot is in the past for current day
                   const isPastTime = (() => {
@@ -1645,7 +1766,7 @@ function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase 
                     }
                     
                     // Parse the time slot (assuming format like "08:00", "13:00", etc.)
-                    const [hours, minutes] = slot.split(':').map(Number);
+                    const [hours, minutes] = slot.value.split(':').map(Number);
                     
                     const slotTime = new Date();
                     slotTime.setHours(hours, minutes, 0, 0);
@@ -1657,11 +1778,11 @@ function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase 
                   
                   return (
                     <button
-                      key={slot}
+                      key={slot.value}
                       type="button"
                       onClick={() => {
                         if (!isDisabled && !isPastTime) {
-                          setTime(slot);
+                          setTime(slot.value);
                         }
                       }}
                       disabled={isDisabled}
@@ -1679,7 +1800,7 @@ function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase 
                         !date ? 'Please select a date first' : ''
                       }
                     >
-                      {slot}
+                      {slot.display}
                       {isPastTime && (
                         <span className="ml-1 text-xs">⏰</span>
                       )}
@@ -1882,31 +2003,38 @@ export default function ConciliationPage() {
   // Function to fetch fresh Lupon member data
   const fetchLuponMembers = async () => {
     try {
-      const [members, chairperson, secretary] = await Promise.all([
-        fetch('http://localhost:5000/api/lupon-members').then(res => res.json()),
-        fetch('http://localhost:5000/api/lupon-chairperson').then(res => res.json()),
-        fetch('http://localhost:5000/api/lupon-secretary').then(res => res.json()),
+      type LuponMemberResponse = LuponMember | LuponMember[];
+      const [membersRes, chairpersonRes, secretaryRes] = await Promise.all([
+        fetch('http://localhost:5000/api/lupon-members').then(res => res.json() as Promise<LuponMember[]>),
+        fetch('http://localhost:5000/api/lupon-chairperson').then(res => res.json() as Promise<LuponMember[]>),
+        fetch('http://localhost:5000/api/lupon-secretary').then(res => res.json() as Promise<LuponMember[]>),
       ]);
+
+      // Ensure we're working with arrays
+      const members = Array.isArray(membersRes) ? membersRes : [membersRes].filter(Boolean);
+      const chairperson = Array.isArray(chairpersonRes) ? chairpersonRes : [chairpersonRes].filter(Boolean);
+      const secretary = Array.isArray(secretaryRes) ? secretaryRes : [secretaryRes].filter(Boolean);
       
       const all = [
-        ...members.map((m: any) => ({ 
-          id: `member-${m.id}`, 
-          name: m.display_name || m.name || `${m.firstname || ''} ${m.lastname || ''}`.trim() 
+        ...members.map(m => ({
+          id: `member-${m.id}`,
+          name: m.display_name || m.name || `${m.firstname || ''} ${m.lastname || ''}`.trim()
         })),
-        ...chairperson.map((c: any) => ({ 
-          id: `chairperson-${c.id}`, 
-          name: c.display_name || c.name || `${c.firstname || ''} ${c.lastname || ''}`.trim() 
+        ...chairperson.map(c => ({
+          id: `chairperson-${c.id}`,
+          name: c.display_name || c.name || `${c.firstname || ''} ${c.lastname || ''}`.trim()
         })),
-        ...secretary.map((s: any) => ({ 
-          id: `secretary-${s.id}`, 
-          name: s.display_name || s.name || `${s.firstname || ''} ${s.lastname || ''}`.trim() 
+        ...secretary.map(s => ({
+          id: `secretary-${s.id}`,
+          name: s.display_name || s.name || `${s.firstname || ''} ${s.lastname || ''}`.trim()
         })),
       ];
+      
       setArbitrators(all);
       
-      setLuponMembers(members.map((m: any) => ({ 
-        id: m.id, 
-        name: m.display_name || m.name || `${m.firstname || ''} ${m.lastname || ''}`.trim() 
+      setLuponMembers(members.map(m => ({
+        id: m.id,
+        name: m.display_name || m.name || `${m.firstname || ''} ${m.lastname || ''}`.trim()
       })));
     } catch (error) {
       console.error('Failed to fetch Lupon members:', error);
@@ -2734,7 +2862,6 @@ export default function ConciliationPage() {
           setShowSeePhotosModal(true);
         }}
         onRemoveSession={() => {}}
-        luponMembers={luponMembers}
       />
       <SeePhotosModal open={showSeePhotosModal} onClose={() => setShowSeePhotosModal(false)} images={seePhotosImages} />
       <StartConciliationModal

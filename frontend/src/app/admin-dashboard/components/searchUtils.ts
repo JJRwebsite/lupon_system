@@ -7,9 +7,6 @@ export interface FilterOptions {
   sortBy: string;
 }
 
-// Define a type for array items that can be strings or objects with a name property
-type SearchableValue = string | { name: string } | { [key: string]: unknown };
-
 // Base interface that all searchable objects must implement
 export type BaseSearchableObject = {
   id?: number | string;
