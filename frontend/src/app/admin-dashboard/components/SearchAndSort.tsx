@@ -1,5 +1,4 @@
 "use client";
-import { useState, useEffect } from "react";
 
 interface SearchAndSortProps {
   searchQuery: string;
@@ -50,9 +49,7 @@ export default function SearchAndSort({
   searchPlaceholder = "Search by case title, complainant, or respondent...",
   statusOptions = defaultStatusOptions,
   sortOptions = defaultSortOptions,
-  showDateFilter = true,
-  totalCount,
-  title = "Cases"
+  showDateFilter = true
 }: SearchAndSortProps) {
   
   const hasActiveFilters = searchQuery || statusFilter !== "all" || dateFilter !== "all" || sortBy !== "date_desc";

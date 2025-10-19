@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { EyeIcon, PencilSquareIcon, TrashIcon, PlusCircleIcon, XMarkIcon, DocumentTextIcon, UserIcon, UsersIcon, IdentificationIcon, ExclamationTriangleIcon, CheckCircleIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import ResidentSelector from "../../components/ResidentSelector";
@@ -708,7 +708,7 @@ function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: E
     
     // Update the previous open state
     prevOpenRef.current = open;
-  }, [open, complaint]);
+  }, [open, complaint, isInitialized]);
 
 
 
