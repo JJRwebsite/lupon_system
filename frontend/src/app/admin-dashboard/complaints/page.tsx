@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { EyeIcon, PencilSquareIcon, TrashIcon, PlusCircleIcon, XMarkIcon, DocumentTextIcon, UserIcon, UsersIcon, IdentificationIcon, ExclamationTriangleIcon, CheckCircleIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
 import { useRouter } from "next/navigation";
 import ResidentSelector from "../../components/ResidentSelector";
@@ -28,8 +28,65 @@ interface Complaint {
   nature_of_case?: string;
   relief_description?: string;
   date_filed?: string;
-
 }
+
+// Types for case options
+type CaseType = 'public_interest' | 'persons' | 'liberty_security' | 'property' | 'chastity' | 'honor';
+type CaseTitleOptions = Record<CaseType, readonly string[]>;
+
+// Nature case options with labels
+const natureCaseOptions = [
+  { value: "public_interest", label: "CRIME AGAINST PUBLIC INTEREST 📢" },
+  { value: "persons", label: "CRIMES AGAINST PERSONS 👥" },
+  { value: "liberty_security", label: "CRIMES AGAINST PERSONAL LIBERTY & SECURITY 🔒" },
+  { value: "property", label: "CRIME AGAINST PROPERTY 💰" },
+  { value: "chastity", label: "CRIMES AGAINST CHASTITY 👗" },
+  { value: "honor", label: "CRIMES AGAINST HONOR 🎭" },
+] as const;
+
+// Case title options organized by case type
+const caseTitleOptions: CaseTitleOptions = {
+  public_interest: [
+    "Alarms and scandals",
+    "Using false certificate",
+    "Using fictitious name and concealing true name",
+    "Illegal use of uniforms and insignias"
+  ] as const,
+  persons: [
+    "Physical injuries inflicted by tumultuous affray",
+    "Giving assistance to suicide",
+    "Less serious physical injuries",
+    "Slight physical injuries and maltreatment"
+  ] as const,
+  liberty_security: [
+    "Abandonment of persons in danger and abandonment of one's own victim",
+    "Abandoning a minor",
+    "Light threats",
+    "Light coercion"
+  ] as const,
+  property: [
+    "Theft",
+    "Altering boundaries or landmarks",
+    "Swindling or estafa",
+    "Swindling a minor",
+    "Removal, sale, or pledge of mortgaged property",
+    "Special case of malicious mischief"
+  ] as const,
+  chastity: [
+    "Simple seduction",
+    "Acts of lasciviousness with consent of offended party"
+  ] as const,
+  honor: [
+    "Threatening to publish and offer to prevent such publication for compensation",
+    "Prohibiting publication of acts referred to in the course of official proceedings",
+    "Slander",
+    "Slander by deed",
+    "Incriminating innocent persons",
+    "Intriguing against honor",
+    "Reckless imprudence"
+  ] as const
+};
+
 
 function CreateComplaintModal({ open, onClose, onSuccess }: { open: boolean; onClose: () => void; onSuccess: () => void }) {
   const [caseTitle, setCaseTitle] = useState("");
@@ -260,7 +317,7 @@ function CreateComplaintModal({ open, onClose, onSuccess }: { open: boolean; onC
         const errorData = await response.json();
         setError(errorData.message || 'Failed to file complaint');
       }
-    } catch (_error) {
+    } catch {
       setError('Network error. Please try again.');
     } finally {
       setSubmitting(false);
@@ -598,77 +655,26 @@ interface EditComplaintModalProps {
 }
 
 function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: EditComplaintModalProps) {
-  // Early return if no complaint is provided
-  if (!complaint) {
-    return null;
-  }
-
-  const [caseTitle, setCaseTitle] = useState(complaint.case_title || "");
-  const [caseDescription, setCaseDescription] = useState(complaint.case_description || "");
-  const [natureOfCase, setNatureOfCase] = useState(complaint.nature_of_case || "");
-  const [reliefDescription, setReliefDescription] = useState(complaint.relief_description || "");
+  // Initialize state with empty values first
+  const [caseTitle, setCaseTitle] = useState(complaint?.case_title || "");
+  const [caseDescription, setCaseDescription] = useState(complaint?.case_description || "");
+  const [natureOfCase, setNatureOfCase] = useState(complaint?.nature_of_case || "");
+  const [reliefDescription, setReliefDescription] = useState(complaint?.relief_description || "");
   const [otherCaseTitle, setOtherCaseTitle] = useState("");
-
-  const natureCaseOptions = [
-    { value: "public_interest", label: "CRIME AGAINST PUBLIC INTEREST 📢" },
-    { value: "persons", label: "CRIMES AGAINST PERSONS 👥" },
-    { value: "liberty_security", label: "CRIMES AGAINST PERSONAL LIBERTY & SECURITY 🔒" },
-    { value: "property", label: "CRIME AGAINST PROPERTY 💰" },
-    { value: "chastity", label: "CRIMES AGAINST CHASTITY 👗" },
-    { value: "honor", label: "CRIMES AGAINST HONOR 🎭" },
-  ];
-  const caseTitleOptions: { [key: string]: string[] } = {
-    public_interest: [
-      "Alarms and scandals",
-      "Using false certificate",
-      "Using fictitious name and concealing true name",
-      "Illegal use of uniforms and insignias"
-    ],
-    persons: [
-      "Physical injuries inflicted by tumultuous affray",
-      "Giving assistance to suicide",
-      "Less serious physical injuries",
-      "Slight physical injuries and maltreatment"
-    ],
-    liberty_security: [
-      "Abandonment of persons in danger and abandonment of one's own victim",
-      "Abandoning a minor",
-      "Light threats",
-      "Light coercion"
-    ],
-    property: [
-      "Theft",
-      "Altering boundaries or landmarks",
-      "Swindling or estafa",
-      "Swindling a minor",
-      "Removal, sale, or pledge of mortgaged property",
-      "Special case of malicious mischief"
-    ],
-    chastity: [
-      "Simple seduction",
-      "Acts of lasciviousness with consent of offended party"
-    ],
-    honor: [
-      "Threatening to publish and offer to prevent such publication for compensation",
-      "Prohibiting publication of acts referred to in the course of official proceedings",
-      "Slander",
-      "Slander by deed",
-      "Incriminating innocent persons",
-      "Intriguing against honor",
-      "Reckless imprudence"
-    ],
-  };
-
-  // Single party objects
   const [complainant, setComplainant] = useState<Resident | null>(complaint?.complainant || null);
   const [respondent, setRespondent] = useState<Resident | null>(complaint?.respondent || null);
   const [witness, setWitness] = useState<Resident | null>(complaint?.witness || null);
-
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [isInitialized, setIsInitialized] = useState(false);
 
+  // Track previous open state to detect changes
+  const prevOpenRef = useRef<boolean | undefined>(undefined);
+  
+  // Update state when complaint prop changes or modal is opened/closed
   useEffect(() => {
-    if (open && complaint) {
+    // Only initialize when opening the modal with a complaint
+    if (open && complaint && !isInitialized) {
       console.log('EditComplaintModal received complaint:', complaint);
       console.log('Complainant data:', complaint.complainant);
       console.log('Respondent data:', complaint.respondent);
@@ -683,13 +689,41 @@ function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: E
       setRespondent(complaint.respondent || null);
       setWitness(complaint.witness || null);
       setError("");
+      setIsInitialized(true);
     }
+    
+    // Reset form when modal is closed
+    if (prevOpenRef.current && !open) {
+      setCaseTitle("");
+      setCaseDescription("");
+      setNatureOfCase("");
+      setReliefDescription("");
+      setOtherCaseTitle("");
+      setComplainant(null);
+      setRespondent(null);
+      setWitness(null);
+      setError("");
+      setIsInitialized(false);
+    }
+    
+    // Update the previous open state
+    prevOpenRef.current = open;
   }, [open, complaint]);
+
+
+
+
 
   const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSubmitting(true);
     setError("");
+
+    if (!complaint) {
+      setError("No complaint data available.");
+      setSubmitting(false);
+      return;
+    }
 
     // Validate required fields
     if (!caseTitle || !caseDescription || !natureOfCase || !reliefDescription) {
@@ -772,11 +806,11 @@ function EditComplaintModal({ open, onClose, onSuccess, complaint, onUpdate }: E
                 <label className="block text-sm font-medium">Case Title</label>
                 <select className="w-full border rounded px-2 py-1" value={caseTitle} onChange={e => setCaseTitle(e.target.value)} required disabled={!natureOfCase}>
                   <option value="">Select Title</option>
-                  {natureOfCase && caseTitleOptions[natureOfCase]?.map((title, idx) => (
+                  {natureOfCase && (caseTitleOptions[natureOfCase as CaseType] || []).map((title) => (
                     <option key={title} value={title}>{title}</option>
                   ))}
                   {natureOfCase && <option value="other">Others (please specify)</option>}
-                  {natureOfCase && caseTitle && !caseTitleOptions[natureOfCase]?.includes(caseTitle) && caseTitle !== "other" && (
+                  {natureOfCase && caseTitle && !(caseTitleOptions[natureOfCase as CaseType] || []).includes(caseTitle) && caseTitle !== "other" && (
                     <option value={caseTitle}>{caseTitle}</option>
                   )}
                 </select>
@@ -1252,7 +1286,7 @@ export default function ComplaintsPage() {
   const [showCreateSuccess, setShowCreateSuccess] = useState(false);
   const [showEditSuccess, setShowEditSuccess] = useState(false);
   const [showReferralModal, setShowReferralModal] = useState(false);
-  const [referralComplaint, setReferralComplaint] = useState<Complaint | null>(null);
+  const [referralComplaint] = useState<Complaint | null>(null);
   const [showReferralSuccess, setShowReferralSuccess] = useState(false);
 
   const fetchComplaints = async () => {
