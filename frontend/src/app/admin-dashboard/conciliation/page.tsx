@@ -36,6 +36,11 @@ interface ConciliationCase {
   lupon_panel?: string | string[];
 }
 
+// Extended interface for conciliation with lupon_panel
+interface ConciliationWithLuponPanel extends ConciliationCase {
+  lupon_panel: string | string[];
+}
+
 // Utility: Always sort sessions by ID (oldest to newest)
 function getSortedSessions(sessions: ConciliationSession[]): ConciliationSession[] {
   return [...sessions].sort((a, b) => a.id - b.id);
@@ -129,11 +134,11 @@ const FormsModal = ({ open, onClose, conciliation, handleDownloadPDF }: FormsMod
       panelMembers = conciliation.sessions[0].panel;
     }
     // If not in sessions, check if it exists in the main conciliation object (from lupon_panel field)
-    else if ((conciliation as any).lupon_panel) {
+    else if ('lupon_panel' in conciliation && conciliation.lupon_panel) {
       try {
-        panelMembers = typeof (conciliation as any).lupon_panel === 'string' 
-          ? JSON.parse((conciliation as any).lupon_panel) 
-          : (conciliation as any).lupon_panel;
+        panelMembers = typeof conciliation.lupon_panel === 'string' 
+          ? JSON.parse(conciliation.lupon_panel) 
+          : conciliation.lupon_panel;
       } catch (e) {
         console.error('Error parsing lupon_panel:', e);
         panelMembers = [];
