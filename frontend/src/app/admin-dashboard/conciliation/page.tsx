@@ -36,10 +36,6 @@ interface ConciliationCase {
   lupon_panel?: string | string[];
 }
 
-// Extended interface for conciliation with lupon_panel
-interface ConciliationWithLuponPanel extends ConciliationCase {
-  lupon_panel: string | string[];
-}
 
 // Utility: Always sort sessions by ID (oldest to newest)
 function getSortedSessions(sessions: ConciliationSession[]): ConciliationSession[] {
@@ -641,7 +637,7 @@ function StartConciliationModal({
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
     const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
+
     const startDate = new Date(firstDay);
     startDate.setDate(startDate.getDate() - firstDay.getDay());
     
@@ -819,9 +815,9 @@ function StartConciliationModal({
       const currentTimeFormatted = formatTimeForComparison(currentTime);
       
       // Check if there's already a reschedule record with minutes for the EXACT current schedule
-      const currentReschedule = conciliation.sessions[0]?.reschedules?.find((r: any) => {
-        const reschedDateFormatted = formatDateForComparison(r.reschedule_date);
-        const reschedTimeFormatted = formatTimeForComparison(r.reschedule_time);
+      const currentReschedule = conciliation.sessions[0]?.reschedules?.find((r: { schedule_date: string; schedule_time: string; minutes?: string }) => {
+        const reschedDateFormatted = formatDateForComparison(r.schedule_date);
+        const reschedTimeFormatted = formatTimeForComparison(r.schedule_time);
         
         return reschedDateFormatted === currentDateFormatted && 
                reschedTimeFormatted === currentTimeFormatted && 
@@ -1420,7 +1416,7 @@ function SetArbitrationModal({ open, onClose, onSave, arbitrators, selectedCase 
     const year = currentMonth.getFullYear();
     const month = currentMonth.getMonth();
     const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
+ 
     const startDate = new Date(firstDay);
     startDate.setDate(startDate.getDate() - firstDay.getDay());
     
